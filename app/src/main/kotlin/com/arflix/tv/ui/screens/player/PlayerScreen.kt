@@ -420,6 +420,7 @@ fun PlayerScreen(
     var pendingNextBingeGroup by remember { mutableStateOf<String?>(null) }
     var nextEpisodeIdentity by remember { mutableStateOf<EpisodeIdentity?>(null) }
     var previousEpisodeIdentity by remember { mutableStateOf<EpisodeIdentity?>(null) }
+    var nextEpisodeAired by remember { mutableStateOf(true) }
     LaunchedEffect(mediaId, seasonNumber, episodeNumber, tmdbSeasonNumber, tmdbEpisodeNumber, kitsuId, kitsuEpisodeNumber) {
         if (mediaType == MediaType.TV && seasonNumber != null && episodeNumber != null) {
             val current = EpisodeIdentity(
@@ -432,9 +433,14 @@ fun PlayerScreen(
             )
             nextEpisodeIdentity = viewModel.adjacentEpisodeIdentity(mediaId, current, forward = true)
             previousEpisodeIdentity = viewModel.adjacentEpisodeIdentity(mediaId, current, forward = false)
+            // Gate autoplay on unaired episodes (issue #589): check if the next episode has aired.
+            nextEpisodeAired = nextEpisodeIdentity?.let { next ->
+                viewModel.isEpisodeAired(mediaId, next.tmdbSeason, next.tmdbEpisode)
+            } ?: true
         } else {
             nextEpisodeIdentity = null
             previousEpisodeIdentity = null
+            nextEpisodeAired = true
         }
     }
     var nextEpisodePromptButton by remember { mutableIntStateOf(0) } // 0 = next, 1 = cancel
@@ -2484,7 +2490,8 @@ fun PlayerScreen(
                         !showSourceMenu &&
                         !showSubtitleMenu &&
                         uiState.error == null &&
-                        uiState.autoPlayNext,
+                        uiState.autoPlayNext &&
+                        nextEpisodeAired,
                 )
             ) {
                 val selected = uiState.selectedStream
@@ -2860,7 +2867,7 @@ fun PlayerScreen(
                             }
                             Key.DirectionLeft -> {
                                 when (subtitleSettingsRow) {
-                                    0 -> subtitleSyncOffsetMs = (subtitleSyncOffsetMs - 100L).coerceAtLeast(-10000L)
+                                    0 -> subtitleSyncOffsetMs = (subtitleSyncOffsetMs - 100L).coerceAtLeast(-30000L)
                                     1 -> subtitleSizePct = (subtitleSizePct - 10).coerceAtLeast(50)
                                     2 -> subtitleVerticalPct = (subtitleVerticalPct - 1).coerceAtLeast(0)
                                 }
@@ -2868,7 +2875,7 @@ fun PlayerScreen(
                             }
                             Key.DirectionRight -> {
                                 when (subtitleSettingsRow) {
-                                    0 -> subtitleSyncOffsetMs = (subtitleSyncOffsetMs + 100L).coerceAtMost(10000L)
+                                    0 -> subtitleSyncOffsetMs = (subtitleSyncOffsetMs + 100L).coerceAtMost(30000L)
                                     1 -> subtitleSizePct = (subtitleSizePct + 10).coerceAtMost(300)
                                     2 -> subtitleVerticalPct = (subtitleVerticalPct + 1).coerceAtMost(50)
                                 }
@@ -3880,8 +3887,8 @@ fun PlayerScreen(
                 sizePct = subtitleSizePct,
                 verticalPct = subtitleVerticalPct,
                 onRowSelect = { subtitleSettingsRow = it },
-                onOffsetDecrease = { subtitleSyncOffsetMs = (subtitleSyncOffsetMs - 100L).coerceAtLeast(-10000L) },
-                onOffsetIncrease = { subtitleSyncOffsetMs = (subtitleSyncOffsetMs + 100L).coerceAtMost(10000L) },
+                onOffsetDecrease = { subtitleSyncOffsetMs = (subtitleSyncOffsetMs - 100L).coerceAtLeast(-30000L) },
+                onOffsetIncrease = { subtitleSyncOffsetMs = (subtitleSyncOffsetMs + 100L).coerceAtMost(30000L) },
                 onSizeDecrease = { subtitleSizePct = (subtitleSizePct - 10).coerceAtLeast(50) },
                 onSizeIncrease = { subtitleSizePct = (subtitleSizePct + 10).coerceAtMost(300) },
                 onVerticalDecrease = { subtitleVerticalPct = (subtitleVerticalPct - 1).coerceAtLeast(0) },

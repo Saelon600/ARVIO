@@ -64,6 +64,7 @@ import android.content.pm.ActivityInfo
 import com.arflix.tv.util.DeviceType
 import com.arflix.tv.util.DEVICE_MODE_OVERRIDE_KEY
 import com.arflix.tv.util.SKIP_PROFILE_SELECTION_KEY
+import com.arflix.tv.util.DEFAULT_STARTUP_PAGE_KEY
 import com.arflix.tv.util.OLED_BLACK_BACKGROUND_KEY
 import com.arflix.tv.util.ACCENT_COLOR_KEY
 import com.arflix.tv.util.LocalDeviceType
@@ -275,9 +276,11 @@ class MainActivity : ComponentActivity() {
                 this@MainActivity.settingsDataStore.data.map { it[DEVICE_MODE_OVERRIDE_KEY] }
             }.collectAsStateWithLifecycle(initialValue = null)
             var skipProfileSelection by remember { mutableStateOf<Boolean?>(null) }
+            var defaultStartupPage by remember { mutableStateOf("home") }
             LaunchedEffect(Unit) {
-                val skipSelection =
-                    this@MainActivity.settingsDataStore.data.first()[SKIP_PROFILE_SELECTION_KEY] ?: false
+                val prefs = this@MainActivity.settingsDataStore.data.first()
+                val skipSelection = prefs[SKIP_PROFILE_SELECTION_KEY] ?: false
+                defaultStartupPage = prefs[DEFAULT_STARTUP_PAGE_KEY] ?: "home"
                 if (skipSelection) {
                     val profiles = profileRepository.get()
                     val activeProfile = profiles.getActiveProfile()
@@ -622,7 +625,12 @@ fun ArflixApp(
     }
 
     val startDestination = if (skipProfileSelection == true && activeProfile != null) {
-        Screen.Home.route
+        when (defaultStartupPage) {
+            "live_tv" -> Screen.Tv.route
+            "watchlist" -> Screen.Watchlist.route
+            "search" -> Screen.Search.route
+            else -> Screen.Home.route
+        }
     } else {
         Screen.ProfileSelection.route
     }

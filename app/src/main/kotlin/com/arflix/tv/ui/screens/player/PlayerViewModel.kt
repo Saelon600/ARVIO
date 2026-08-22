@@ -260,6 +260,27 @@ class PlayerViewModel @Inject constructor(
         return fallbackAdjacentEpisodeIdentity(current, forward)
     }
 
+    /**
+     * Checks whether the given episode (identified by season + episode number) has aired.
+     * Returns `true` if the episode has an air date that is today or in the past.
+     * Returns `true` if the air date is unknown (optimistically allow autoplay).
+     *
+     * Used to gate autoplay on unaired episodes (issue #589).
+     */
+    suspend fun isEpisodeAired(
+        tmdbId: Int,
+        seasonNumber: Int,
+        episodeNumber: Int
+    ): Boolean {
+        return runCatching {
+            val seasonDetails = tmdbApi.getTvSeason(tmdbId, seasonNumber, Constants.TMDB_API_KEY)
+            val episode = seasonDetails.episodes.firstOrNull { it.episodeNumber == episodeNumber }
+            val airDateStr = episode?.airDate?.takeIf { it.isNotBlank() } ?: return@runCatching true
+            val airDate = java.time.LocalDate.parse(airDateStr, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+            !airDate.isAfter(java.time.LocalDate.now())
+        }.getOrDefault(true)
+    }
+
     // AI subtitle settings (read once per video load)
     private var aiSubtitleEnabled = false
     private var aiSubtitleAutoSelect = false

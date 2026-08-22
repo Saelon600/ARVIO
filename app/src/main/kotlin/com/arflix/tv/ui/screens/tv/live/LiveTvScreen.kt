@@ -80,6 +80,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.arflix.tv.R
+import com.arflix.tv.ui.theme.Pink
 import com.arflix.tv.data.model.IptvChannel
 import com.arflix.tv.data.model.IptvNowNext
 import com.arflix.tv.data.model.IptvProgram
@@ -407,6 +408,7 @@ fun LiveTvScreen(
     onNavigateToWatchlist: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     onNavigateToIptvSettings: (() -> Unit)? = null,
+    onNavigateToDetails: (com.arflix.tv.data.model.MediaType, Int) -> Unit = { _, _ -> },
     onSwitchProfile: () -> Unit = {},
     onBack: () -> Unit = {},
 ) {
@@ -1450,6 +1452,10 @@ fun LiveTvScreen(
     var isFullScreen by rememberSaveable { mutableStateOf(initialStreamUrl != null) }
     var fullscreenGuideOpen by remember { mutableStateOf(false) }
     var variantPickerChannel by remember { mutableStateOf<EnrichedChannel?>(null) }
+    // EPG program action dialog: when a user clicks a program in the guide,
+    // offer "Watch Live" or "Search Sources" (issue #506-style EPG intelligence).
+    var programActionDialog by remember { mutableStateOf<ProgramActionData?>(null) }
+    var programActionSearching by remember { mutableStateOf(false) }
     LaunchedEffect(isFullScreen) {
         onFullscreenChanged(isFullScreen)
     }
@@ -2476,7 +2482,14 @@ fun LiveTvScreen(
                             focusZone = LiveTvFocusZone.CHANNEL_LIST
                             selectChannel(channel)
                         },
-                        onProgramSelect = { channel, program -> playProgramInMini(channel, program) },
+                        onProgramSelect = { channel, program ->
+                            if (program != null) {
+                                // Show action dialog: Watch Live vs Search Sources
+                                programActionDialog = ProgramActionData(channel, program)
+                            } else {
+                                playProgramInMini(channel, null)
+                            }
+                        },
                         onChannelFocused = { channel -> commitFocusedChannel(channel) },
                         onChannelFavoriteToggle = { id -> viewModel.toggleFavoriteChannel(id) },
                         favorites = favSet,
@@ -2609,7 +2622,14 @@ fun LiveTvScreen(
                         compact = compactTouchLayout,
                         gridFocused = focusZone == LiveTvFocusZone.CHANNEL_LIST || focusZone == LiveTvFocusZone.EPG,
                         onChannelSelect = { channel, _ -> selectChannel(channel) },
-                        onProgramSelect = { channel, program -> playProgramInMini(channel, program) },
+                        onProgramSelect = { channel, program ->
+                            if (program != null) {
+                                // Show action dialog: Watch Live vs Search Sources
+                                programActionDialog = ProgramActionData(channel, program)
+                            } else {
+                                playProgramInMini(channel, null)
+                            }
+                        },
                         onChannelFocused = { channel -> commitFocusedChannel(channel) },
                         onChannelFavoriteToggle = { id -> viewModel.toggleFavoriteChannel(id) },
                         favorites = favSet,
@@ -3025,6 +3045,84 @@ fun LiveTvScreen(
                 .align(Alignment.BottomCenter)
                 .padding(bottom = if (isFullScreen) 72.dp else 24.dp),
         )
+
+        // EPG Program Action dialog — shown when the user clicks a program cell.
+        // Offers "Watch Live" (tune to channel) or "Search Sources" (find on-demand).
+        val actionData = programActionDialog
+        if (actionData != null) {
+            val program = actionData.program
+            val channel = actionData.channel
+            val isNow = program.isLive(guideClockMillis)
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { programActionDialog = null },
+                title = {
+                    androidx.tv.material3.Text(
+                        text = program.title,
+                        style = ArflixTypography.cardTitle,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        androidx.tv.material3.Text(
+                            text = channel.name,
+                            style = ArflixTypography.caption,
+                            color = TextSecondary,
+                        )
+                        androidx.tv.material3.Text(
+                            text = "${formatClock(program.startUtcMillis)} - ${formatClock(program.endUtcMillis)}",
+                            style = ArflixTypography.body,
+                            color = TextSecondary,
+                        )
+                        if (isNow) {
+                            Badge(stringResource(R.string.live_badge_live), Color.White, LiveColors.LiveRed)
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            programActionDialog = null
+                            programActionSearching = true
+                            coroutineScope.launch {
+                                val match = viewModel.searchProgramOnTmdb(program.title)
+                                programActionSearching = false
+                                if (match != null) {
+                                    onNavigateToDetails(match.mediaType, match.id)
+                                } else {
+                                    // No TMDB match — fall back to search screen
+                                    onNavigateToSearch()
+                                }
+                            }
+                        },
+                    ) {
+                        androidx.tv.material3.Text(
+                            text = if (programActionSearching) "Searching..." else stringResource(R.string.epg_search_sources),
+                            style = ArflixTypography.button,
+                            color = Pink,
+                        )
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            programActionDialog = null
+                            playProgramInMini(channel, program)
+                        },
+                    ) {
+                        androidx.tv.material3.Text(
+                            text = stringResource(R.string.epg_watch_live),
+                            style = ArflixTypography.button,
+                            color = TextSecondary,
+                        )
+                    }
+                },
+                containerColor = Color(0xFF1A1A1A),
+                tonalElevation = 8.dp,
+            )
+        }
     }
 }
 
@@ -3157,3 +3255,12 @@ private tailrec fun Context.findActivity(): Activity? {
         else -> null
     }
 }
+
+/**
+ * Data for the EPG program action dialog (issue: EPG intelligence).
+ * Shown when the user clicks a program cell — offers "Watch Live" or "Search Sources".
+ */
+internal data class ProgramActionData(
+    val channel: EnrichedChannel,
+    val program: IptvProgram,
+)

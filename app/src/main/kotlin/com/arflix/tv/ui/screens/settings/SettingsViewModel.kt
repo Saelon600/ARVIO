@@ -217,6 +217,9 @@ data class SettingsUiState(
     val deviceModeOverride: String = "auto",
     // Skip profile selection
     val skipProfileSelection: Boolean = false,
+    // Default section to land on when the app starts (issue #506)
+    // Values: "home", "live_tv", "watchlist", "search"
+    val defaultStartupPage: String = "home",
     val oledBlackBackground: Boolean = false,
     val clockFormat: String = "24h",
     val qualityFilters: List<QualityFilterConfig> = emptyList(),
@@ -485,6 +488,7 @@ class SettingsViewModel @Inject constructor(
             val frameRateMode = normalizeFrameRateMode(prefs[frameRateMatchingModeKey()])
             val deviceModeOverride = prefs[com.arflix.tv.util.DEVICE_MODE_OVERRIDE_KEY] ?: "auto"
             val skipProfileSelection = prefs[com.arflix.tv.util.SKIP_PROFILE_SELECTION_KEY] ?: false
+            val defaultStartupPage = prefs[com.arflix.tv.util.DEFAULT_STARTUP_PAGE_KEY] ?: "home"
             val oledBlackBackground = prefs[com.arflix.tv.util.OLED_BLACK_BACKGROUND_KEY] ?: false
             val contentLang = prefs[contentLanguageKey()] ?: "en-US"
             // Apply content language to MediaRepository immediately
@@ -651,6 +655,7 @@ class SettingsViewModel @Inject constructor(
                 contentLanguage = contentLang,
                 deviceModeOverride = deviceModeOverride,
                 skipProfileSelection = skipProfileSelection,
+                defaultStartupPage = defaultStartupPage,
                 oledBlackBackground = oledBlackBackground,
                 clockFormat = clockFormat,
                 accentColor = accentColor,
@@ -1286,6 +1291,16 @@ class SettingsViewModel @Inject constructor(
                 prefs[com.arflix.tv.util.SKIP_PROFILE_SELECTION_KEY] = skip
             }
             _uiState.value = _uiState.value.copy(skipProfileSelection = skip)
+            syncLocalStateToCloud(silent = true)
+        }
+    }
+
+    fun setDefaultStartupPage(page: String) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                prefs[com.arflix.tv.util.DEFAULT_STARTUP_PAGE_KEY] = page
+            }
+            _uiState.value = _uiState.value.copy(defaultStartupPage = page)
             syncLocalStateToCloud(silent = true)
         }
     }

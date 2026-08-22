@@ -85,8 +85,18 @@ data class TvUiState(
 class TvViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     val iptvRepository: IptvRepository,
-    private val cloudSyncRepository: CloudSyncRepository
+    private val cloudSyncRepository: CloudSyncRepository,
+    private val mediaRepository: com.arflix.tv.data.repository.MediaRepository
 ) : ViewModel() {
+
+    /**
+     * Search TMDB for a program title from the EPG and return the first match.
+     * Used by the "Search Sources" action in the EPG (Channels DVR-style feature).
+     */
+    suspend fun searchProgramOnTmdb(title: String): com.arflix.tv.data.model.MediaItem? {
+        val results = mediaRepository.search(title)
+        return results.firstOrNull { it.mediaType == com.arflix.tv.data.model.MediaType.TV || it.mediaType == com.arflix.tv.data.model.MediaType.MOVIE }
+    }
 
     private val _uiState = MutableStateFlow(TvUiState())
     val uiState: StateFlow<TvUiState> = _uiState.asStateFlow()

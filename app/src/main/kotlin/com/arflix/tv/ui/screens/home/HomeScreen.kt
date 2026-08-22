@@ -602,6 +602,7 @@ fun HomeScreen(
     onNavigateToDetails: (MediaType, Int, Int?, Int?) -> Unit = { _, _, _, _ -> },
     onNavigateToCollection: (String) -> Unit = {},
     onNavigateToSearch: () -> Unit = {},
+    onNavigateToViewAll: (String) -> Unit = {},
     onNavigateToWatchlist: () -> Unit = {},
     onNavigateToTv: (channelId: String?, streamUrl: String?) -> Unit = { _, _ -> },
     onNavigateToPlayer: (MediaType, Int, String, String?, String?) -> Unit = { _, _, _, _, _ -> },
@@ -1211,6 +1212,13 @@ fun HomeScreen(
             onNavigateToDetails = onNavigateToDetails,
             onNavigateToCollection = onNavigateToCollection,
             onNavigateToSearch = onNavigateToSearch,
+            onNavigateToViewAll = { categoryId ->
+                if (categoryId.startsWith("collection_row_")) {
+                    onNavigateToCollection(categoryId)
+                } else {
+                    onNavigateToSearch()
+                }
+            },
             onNavigateToWatchlist = onNavigateToWatchlist,
             onNavigateToTv = onNavigateToTv,
             getIptvStreamUrl = { itemId -> viewModel.getIptvStreamUrl(itemId) },
@@ -2248,6 +2256,7 @@ private fun HomeInputLayer(
     onNavigateToDetails: (MediaType, Int, Int?, Int?) -> Unit,
     onNavigateToCollection: (String) -> Unit,
     onNavigateToSearch: () -> Unit,
+    onNavigateToViewAll: (String) -> Unit = {},
     onNavigateToWatchlist: () -> Unit,
     onNavigateToTv: (channelId: String?, streamUrl: String?) -> Unit,
     getIptvStreamUrl: (itemId: Int) -> String?,
@@ -2674,6 +2683,7 @@ private fun HomeInputLayer(
             onNavigateToSearch = onNavigateToSearch,
             onSwitchProfile = onSwitchProfile,
             onNavigateToDetails = onNavigateToDetails,
+            onNavigateToViewAll = onNavigateToViewAll,
             onMobileCategoryVisiblePosition = onMobileCategoryVisiblePosition,
             featuredTrailerKey = featuredTrailerKey,
             featuredTrailerDelayMs = featuredTrailerDelayMs,
@@ -2731,6 +2741,7 @@ private fun HomeRowsLayer(
     onNavigateToSearch: () -> Unit = {},
     onSwitchProfile: () -> Unit = {},
     onNavigateToDetails: (MediaType, Int, Int?, Int?) -> Unit = { _, _, _, _ -> },
+    onNavigateToViewAll: (String) -> Unit = {},
     onMobileCategoryVisiblePosition: (String, Int) -> Unit = { _, _ -> },
     featuredTrailerKey: String? = null,
     featuredTrailerDelayMs: Long = 0L,
@@ -2750,6 +2761,7 @@ private fun HomeRowsLayer(
             categoryHasMoreMap = categoryHasMoreMap,
             onLoadMoreCategory = onLoadMoreCategory,
             onNavigateToDetails = onNavigateToDetails,
+            onNavigateToViewAll = onNavigateToViewAll,
             onItemClick = onItemClick,
             onItemLongClick = onItemLongClick,
             onCategoryVisiblePosition = { categoryId, lastVisibleItemIndex ->
@@ -2778,7 +2790,8 @@ private fun HomeRowsLayer(
             featuredTrailerKey = featuredTrailerKey,
             featuredTrailerDelayMs = featuredTrailerDelayMs,
             featuredTrailerVolume = featuredTrailerVolume,
-            onItemClick = onItemClick
+            onItemClick = onItemClick,
+            onNavigateToViewAll = onNavigateToViewAll
         )
     }
 }
@@ -2796,6 +2809,7 @@ private fun MobileHomeRowsLayer(
     categoryHasMoreMap: Map<String, Boolean> = emptyMap(),
     onLoadMoreCategory: (String) -> Unit = {},
     onNavigateToDetails: (MediaType, Int, Int?, Int?) -> Unit = { _, _, _, _ -> },
+    onNavigateToViewAll: (String) -> Unit = {},
     onItemClick: (MediaItem) -> Unit,
     onItemLongClick: ((MediaItem, Boolean) -> Unit)? = null,
     onCategoryVisiblePosition: (String, Int) -> Unit = { _, _ -> }
@@ -3006,7 +3020,8 @@ private fun TvHomeRowsLayer(
     featuredTrailerKey: String? = null,
     featuredTrailerDelayMs: Long = 0L,
     featuredTrailerVolume: Float = 0f,
-    onItemClick: (MediaItem) -> Unit
+    onItemClick: (MediaItem) -> Unit,
+    onNavigateToViewAll: (String) -> Unit = {}
 ) {
     // ── Focus-row stabilizer ──
     // Track the focused row by its category ID (stable) rather than integer
@@ -3212,7 +3227,8 @@ private fun TvHomeRowsLayer(
                             featuredTrailerDelayMs = featuredTrailerDelayMs,
                             featuredTrailerVolume = featuredTrailerVolume,
                             onItemClick = onItemClick,
-                            onItemFocused = onRowItemFocused
+                            onItemFocused = onRowItemFocused,
+                            onNavigateToViewAll = onNavigateToViewAll
                         )
                     }
                 }
@@ -3427,7 +3443,8 @@ private fun ContentRow(
     featuredTrailerDelayMs: Long = 0L,
     featuredTrailerVolume: Float = 0f,
     onItemClick: (MediaItem) -> Unit,
-    onItemFocused: (MediaItem, Int) -> Unit
+    onItemFocused: (MediaItem, Int) -> Unit,
+    onNavigateToViewAll: (String) -> Unit = {}
 ) {
     val isCollectionRow = category.id.startsWith("collection_row_")
     val effectiveCategoryHasMore = !isCollectionRow && categoryHasMore
@@ -3787,6 +3804,17 @@ private fun ContentRow(
                 }
                 }
             }
+            // "View All" button at end of row when more items are available
+            if (effectiveCategoryHasMore) {
+                item {
+                    ViewAllButton(
+                        categoryId = category.id,
+                        onClick = onNavigateToViewAll,
+                        modifier = Modifier
+                            .padding(top = 8.dp, bottom = 8.dp)
+                    )
+                }
+            }
             if (railFocusOverlayActive) {
                 ArvioFocusableSurface(
                     modifier = Modifier
@@ -3810,4 +3838,53 @@ private fun ContentRow(
             }
         }  // Close Box
     }  // Close Column
+}
+
+// View All button pill for catalog rows with more items
+@Composable
+private fun ViewAllButton(
+    categoryId: String,
+    onClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val isFocused = remember { mutableStateOf(false) }
+    
+    ArvioFocusableSurface(
+        modifier = modifier
+            .width(140.dp)
+            .height(60.dp)
+            .then(ArvioFocusableSurface.focusProperties(
+                onFocusChange = isFocused::setValue,
+                focusedScale = 1.05f,
+                pressedScale = 0.95f
+            )),
+        shape = RoundedCornerShape(8.dp),
+        backgroundColor = if (isFocused.value) ArvioSkin.colors.surfaceHighlight else ArvioSkin.colors.surface,
+        outlineColor = if (isFocused.value) ArvioSkin.colors.focusOutline else Color.Transparent,
+        outlineWidth = if (isFocused.value) 2.dp else 0.dp,
+        animateFocus = true,
+        onClick = { onClick(categoryId) }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.view_all),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isFocused.value) ArvioSkin.colors.primary else Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Default.ArrowForward,
+                contentDescription = null,
+                tint = if (isFocused.value) ArvioSkin.colors.primary else Color.White
+            )
+        }
+    }
 }

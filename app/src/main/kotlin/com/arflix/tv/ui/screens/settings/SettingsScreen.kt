@@ -253,7 +253,7 @@ private fun tvGeneralRowsForSection(section: String): List<Int> {
         "ai_subtitles" -> listOf(28, 29, 30, 31, 32, 33)
         "playback" -> listOf(10, 11, 12, 13, 14, 37, 34, 16, 15, 40, 27)
         "appearance" -> listOf(17, 18, 20, 21, 24, 23, 22, 41, 36)
-        "profiles" -> listOf(19)
+        "profiles" -> listOf(19, 42)
         "network" -> listOf(25, 26, 35)
         else -> emptyList()
     }
@@ -442,6 +442,8 @@ fun SettingsScreen(
     var audioLanguagePickerIndex by remember { mutableIntStateOf(0) }
     var showDnsProviderPicker by remember { mutableStateOf(false) }
     var dnsProviderPickerIndex by remember { mutableIntStateOf(0) }
+    var showDefaultStartupPagePicker by remember { mutableStateOf(false) }
+    var defaultStartupPagePickerIndex by remember { mutableIntStateOf(0) }
     var showContentLanguagePicker by remember { mutableStateOf(false) }
     var contentLanguagePickerIndex by remember { mutableIntStateOf(0) }
     var showUiModeWarningDialog by remember { mutableStateOf(false) }
@@ -517,6 +519,11 @@ fun SettingsScreen(
         dnsProviderPickerIndex = options.indexOfFirst { it.equals(uiState.dnsProvider, ignoreCase = true) }
             .coerceAtLeast(0)
         showDnsProviderPicker = true
+    }
+    val openDefaultStartupPagePicker = {
+        val pages = listOf("home", "live_tv", "watchlist", "search")
+        defaultStartupPagePickerIndex = pages.indexOf(uiState.defaultStartupPage).coerceAtLeast(0)
+        showDefaultStartupPagePicker = true
     }
     val openIptvCategories: (String) -> Unit = { playlistId ->
         viewModel.setIptvSelectedPlaylistId(playlistId)
@@ -970,6 +977,7 @@ fun SettingsScreen(
                                                 17 -> viewModel.toggleCardLayoutMode()
                                                 18 -> openUiModeWarningDialog()
                                                 19 -> viewModel.setSkipProfileSelection(!uiState.skipProfileSelection)
+                                                42 -> openDefaultStartupPagePicker()
                                                 20 -> viewModel.setOledBlackBackground(!uiState.oledBlackBackground)
                                                 21 -> viewModel.cycleClockFormat()
                                                 22 -> viewModel.setShowBudget(!uiState.showBudget)
@@ -1280,6 +1288,7 @@ fun SettingsScreen(
                 openSecondarySubtitlePicker = openSecondarySubtitlePicker,
                 openAudioLanguagePicker = openAudioLanguagePicker,
                 openDnsProviderPicker = openDnsProviderPicker,
+                openDefaultStartupPagePicker = openDefaultStartupPagePicker,
                 openUiModeWarningDialog = openUiModeWarningDialog,
                 openQualityFiltersModal = { showQualityFiltersModal = true },
                 onSubtitleAiModelClick = { showAiModelDialog = true },
@@ -1461,6 +1470,7 @@ fun SettingsScreen(
                             subtitleStylized = uiState.subtitleStylized,
                             deviceModeOverride = uiState.deviceModeOverride,
                             skipProfileSelection = uiState.skipProfileSelection,
+                            defaultStartupPage = uiState.defaultStartupPage,
                             oledBlackBackground = uiState.oledBlackBackground,
                             clockFormat = uiState.clockFormat,
                             showBudget = uiState.showBudget,
@@ -1486,6 +1496,7 @@ fun SettingsScreen(
                             onDeviceModeClick = openUiModeWarningDialog,
                             onContentLanguageClick = openContentLanguagePicker,
                             onSkipProfileSelectionToggle = { viewModel.setSkipProfileSelection(it) },
+                            onDefaultStartupPageClick = openDefaultStartupPagePicker,
                             onOledBlackBackgroundToggle = { viewModel.setOledBlackBackground(it) },
                             onClockFormatClick = { viewModel.cycleClockFormat() },
                             onShowBudgetToggle = { viewModel.setShowBudget(it) },
@@ -2205,6 +2216,32 @@ fun SettingsScreen(
                     viewModel.setDnsProvider(it)
                 },
                 onDismiss = { showDnsProviderPicker = false }
+            )
+        }
+
+        if (showDefaultStartupPagePicker) {
+            val startupPageOptions = listOf(
+                stringResource(R.string.default_startup_home),
+                stringResource(R.string.default_startup_live_tv),
+                stringResource(R.string.default_startup_watchlist),
+                stringResource(R.string.default_startup_search)
+            )
+            val startupPageValues = listOf("home", "live_tv", "watchlist", "search")
+            val currentPageIndex = startupPageValues.indexOf(uiState.defaultStartupPage).coerceAtLeast(0)
+            SubtitlePickerModal(
+                title = stringResource(R.string.default_startup_page),
+                options = startupPageOptions,
+                selected = startupPageOptions.getOrElse(currentPageIndex) { startupPageOptions.first() },
+                focusedIndex = defaultStartupPagePickerIndex,
+                onFocusChange = { defaultStartupPagePickerIndex = it },
+                onSelect = { displayName ->
+                    val idx = startupPageOptions.indexOf(displayName)
+                    if (idx in startupPageValues.indices) {
+                        viewModel.setDefaultStartupPage(startupPageValues[idx])
+                    }
+                    showDefaultStartupPagePicker = false
+                },
+                onDismiss = { showDefaultStartupPagePicker = false }
             )
         }
 
@@ -3794,6 +3831,7 @@ private fun MobileSettingsLayout(
     openSecondarySubtitlePicker: () -> Unit = {},
     openAudioLanguagePicker: () -> Unit,
     openDnsProviderPicker: () -> Unit,
+    openDefaultStartupPagePicker: () -> Unit = {},
     openUiModeWarningDialog: () -> Unit,
     openQualityFiltersModal: () -> Unit,
     onSubtitleAiModelClick: () -> Unit,
@@ -4141,6 +4179,7 @@ private fun MobileSettingsSubPage(
     viewModel: SettingsViewModel,
     stremioAddons: List<com.arflix.tv.data.model.Addon>,
     openDnsProviderPicker: () -> Unit,
+    openDefaultStartupPagePicker: () -> Unit = {},
     openUiModeWarningDialog: () -> Unit,
     openQualityFiltersModal: () -> Unit,
     onSubtitleAiModelClick: () -> Unit,
@@ -4256,6 +4295,18 @@ private fun MobileSettingsSubPage(
                         value = if (uiState.skipProfileSelection) "On" else "Off",
                         isFocused = false,
                         onClick = { viewModel.setSkipProfileSelection(!uiState.skipProfileSelection) }
+                    )
+                    MobileSettingsRow(
+                        icon = Icons.Default.Home,
+                        title = stringResource(R.string.default_startup_page),
+                        value = when (uiState.defaultStartupPage) {
+                            "live_tv" -> stringResource(R.string.default_startup_live_tv)
+                            "watchlist" -> stringResource(R.string.default_startup_watchlist)
+                            "search" -> stringResource(R.string.default_startup_search)
+                            else -> stringResource(R.string.default_startup_home)
+                        },
+                        isFocused = false,
+                        onClick = openDefaultStartupPagePicker
                     )
                     MobileSettingsRow(
                         icon = Icons.Default.Language,
@@ -5496,6 +5547,7 @@ private fun TvGeneralSettingsRows(
     subtitleStyle: String = "Bold",
     deviceModeOverride: String = "auto",
     skipProfileSelection: Boolean = false,
+    defaultStartupPage: String = "home",
     oledBlackBackground: Boolean = false,
     clockFormat: String = "24h",
     showBudget: Boolean = true,
@@ -5517,6 +5569,7 @@ private fun TvGeneralSettingsRows(
     onDeviceModeClick: () -> Unit = {},
     onContentLanguageClick: () -> Unit = {},
     onSkipProfileSelectionToggle: (Boolean) -> Unit = {},
+    onDefaultStartupPageClick: () -> Unit = {},
     onOledBlackBackgroundToggle: (Boolean) -> Unit = {},
     onClockFormatClick: () -> Unit = {},
     onShowBudgetToggle: (Boolean) -> Unit = {},
@@ -5634,6 +5687,7 @@ private fun TvGeneralSettingsRows(
                     modifier = Modifier.settingsFocusSlot(localIndex)
                 )
                 19 -> SettingsToggleRow(stringResource(R.string.skip_profile), stringResource(R.string.skip_profile_desc), skipProfileSelection, focusedIndex == localIndex, onSkipProfileSelectionToggle, Modifier.settingsFocusSlot(localIndex))
+                42 -> SettingsRow(Icons.Default.Home, stringResource(R.string.default_startup_page), stringResource(R.string.default_startup_page_desc), when (defaultStartupPage) { "live_tv" -> stringResource(R.string.default_startup_live_tv); "watchlist" -> stringResource(R.string.default_startup_watchlist); "search" -> stringResource(R.string.default_startup_search); else -> stringResource(R.string.default_startup_home) }, focusedIndex == localIndex, onDefaultStartupPageClick, Modifier.settingsFocusSlot(localIndex))
                 20 -> SettingsToggleRow(stringResource(R.string.oled_black_background), stringResource(R.string.oled_black_background_desc), oledBlackBackground, focusedIndex == localIndex, onOledBlackBackgroundToggle, Modifier.settingsFocusSlot(localIndex))
                 21 -> SettingsRow(Icons.Default.Schedule, stringResource(R.string.clock_format), stringResource(R.string.clock_format_desc), if (clockFormat == "12h") "12-hour" else "24-hour", focusedIndex == localIndex, onClockFormatClick, Modifier.settingsFocusSlot(localIndex))
                 22 -> SettingsToggleRow(stringResource(R.string.show_budget), stringResource(R.string.show_budget_desc), showBudget, focusedIndex == localIndex, onShowBudgetToggle, Modifier.settingsFocusSlot(localIndex))
@@ -5700,6 +5754,7 @@ private fun GeneralSettings(
     subtitleStyle: String = "Bold",
     deviceModeOverride: String = "auto",
     skipProfileSelection: Boolean = false,
+    defaultStartupPage: String = "home",
     oledBlackBackground: Boolean = false,
     clockFormat: String = "24h",
     showBudget: Boolean = true,
@@ -5720,6 +5775,7 @@ private fun GeneralSettings(
     onDeviceModeClick: () -> Unit = {},
     onContentLanguageClick: () -> Unit = {},
     onSkipProfileSelectionToggle: (Boolean) -> Unit = {},
+    onDefaultStartupPageClick: () -> Unit = {},
     onOledBlackBackgroundToggle: (Boolean) -> Unit = {},
     onClockFormatClick: () -> Unit = {},
     onShowBudgetToggle: (Boolean) -> Unit = {},
