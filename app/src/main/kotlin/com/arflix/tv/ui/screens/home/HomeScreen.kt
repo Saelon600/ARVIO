@@ -144,6 +144,9 @@ import com.arflix.tv.ui.components.CardLayoutMode
 import com.arflix.tv.ui.components.AppTopBar
 import com.arflix.tv.ui.components.AppTopBarContentTopInset
 import com.arflix.tv.ui.components.MobileHeroBanner
+import com.arflix.tv.ui.components.MobileHeroLayoutMode
+import com.arflix.tv.ui.components.mobileHeroLayoutMode
+import com.arflix.tv.ui.components.mobileHeroLayoutSpec
 import com.arflix.tv.ui.components.ProfileAvatarVisual
 import com.arflix.tv.util.LocalDeviceType
 import com.arflix.tv.ui.components.MediaContextMenu
@@ -2063,6 +2066,16 @@ private fun MobileHeroCarousel(
     onSwitchProfile: () -> Unit = {},
     onNavigateToDetails: (MediaType, Int, Int?, Int?) -> Unit
 ) {
+    val configuration = LocalConfiguration.current
+    val heroLayoutMode = mobileHeroLayoutMode(
+        isTouchDevice = LocalDeviceType.current.isTouchDevice(),
+        smallestScreenWidthDp = configuration.smallestScreenWidthDp,
+        screenWidthDp = configuration.screenWidthDp,
+        screenHeightDp = configuration.screenHeightDp,
+    )
+    val heroSpec = mobileHeroLayoutSpec(heroLayoutMode)
+    val compactLandscapeHero = heroLayoutMode == MobileHeroLayoutMode.LANDSCAPE_COMPACT
+
     val heroItems = remember(categories) {
         val nonCwCats = categories.filter { it.id != "continue_watching" }
         val firstCat = nonCwCats.getOrNull(0)
@@ -2110,32 +2123,37 @@ private fun MobileHeroCarousel(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 26.dp, end = 26.dp, top = 12.dp, bottom = 10.dp),
+                .padding(
+                    start = heroSpec.headerHorizontalPaddingDp.dp,
+                    end = heroSpec.headerHorizontalPaddingDp.dp,
+                    top = heroSpec.headerTopPaddingDp.dp,
+                    bottom = heroSpec.headerBottomPaddingDp.dp,
+                ),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (currentProfile != null) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(heroSpec.headerAvatarSizeDp.dp)
                         .clip(CircleShape)
                         .clickable { onSwitchProfile() }
                 ) {
                     ProfileAvatarVisual(
                         profile = currentProfile,
-                        letterFontSize = 15.sp,
-                        iconPadding = 5.dp
+                        letterFontSize = if (compactLandscapeHero) 13.sp else 15.sp,
+                        iconPadding = if (compactLandscapeHero) 4.dp else 5.dp
                     )
                 }
             } else {
-                Spacer(modifier = Modifier.size(38.dp))
+                Spacer(modifier = Modifier.size(heroSpec.headerAvatarSizeDp.dp))
             }
             Icon(
                 imageVector = Icons.Filled.Search,
                 contentDescription = stringResource(R.string.search),
                 tint = Color.White,
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(heroSpec.headerSearchSizeDp.dp)
                     .clickable { onNavigateToSearch() }
             )
         }
@@ -2186,6 +2204,7 @@ private fun MobileHeroCarousel(
                 rating = rating,
                 logoUrl = logoUrl,
                 onClick = { onNavigateToDetails(item.mediaType, item.id, null, null) },
+                layoutMode = heroLayoutMode,
                 modifier = Modifier.graphicsLayer {
                     scaleX = scale
                     scaleY = scale
@@ -2199,7 +2218,10 @@ private fun MobileHeroCarousel(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 8.dp),
+                    .padding(
+                        top = if (compactLandscapeHero) 4.dp else 10.dp,
+                        bottom = if (compactLandscapeHero) 4.dp else 8.dp,
+                    ),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {

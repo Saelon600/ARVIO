@@ -35,9 +35,81 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Precision
 
-private val BannerShape = RoundedCornerShape(24.dp)
 private val CardBorder = Color(0xFF2B2B2B)
 private val ImdbYellow = Color(0xFFF5C518)
+
+enum class MobileHeroLayoutMode {
+    PORTRAIT_POSTER,
+    LANDSCAPE_COMPACT,
+}
+
+internal data class MobileHeroLayoutSpec(
+    val cardHeightDp: Int?,
+    val cornerRadiusDp: Int,
+    val overlayHorizontalPaddingDp: Int,
+    val overlayBottomPaddingDp: Int,
+    val overlaySpacingDp: Int,
+    val logoHeightDp: Int,
+    val titleFontSizeSp: Int,
+    val titleLineHeightSp: Int,
+    val titleMaxLines: Int,
+    val headerHorizontalPaddingDp: Int,
+    val headerTopPaddingDp: Int,
+    val headerBottomPaddingDp: Int,
+    val headerAvatarSizeDp: Int,
+    val headerSearchSizeDp: Int,
+)
+
+internal fun mobileHeroLayoutMode(
+    isTouchDevice: Boolean,
+    smallestScreenWidthDp: Int,
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+): MobileHeroLayoutMode = if (
+    isTouchDevice &&
+    smallestScreenWidthDp < 600 &&
+    screenWidthDp > screenHeightDp
+) {
+    MobileHeroLayoutMode.LANDSCAPE_COMPACT
+} else {
+    MobileHeroLayoutMode.PORTRAIT_POSTER
+}
+
+internal fun mobileHeroLayoutSpec(mode: MobileHeroLayoutMode): MobileHeroLayoutSpec = when (mode) {
+    MobileHeroLayoutMode.LANDSCAPE_COMPACT -> MobileHeroLayoutSpec(
+        cardHeightDp = 124,
+        cornerRadiusDp = 16,
+        overlayHorizontalPaddingDp = 16,
+        overlayBottomPaddingDp = 10,
+        overlaySpacingDp = 4,
+        logoHeightDp = 36,
+        titleFontSizeSp = 24,
+        titleLineHeightSp = 28,
+        titleMaxLines = 2,
+        headerHorizontalPaddingDp = 20,
+        headerTopPaddingDp = 4,
+        headerBottomPaddingDp = 4,
+        headerAvatarSizeDp = 30,
+        headerSearchSizeDp = 22,
+    )
+    MobileHeroLayoutMode.PORTRAIT_POSTER -> MobileHeroLayoutSpec(
+        cardHeightDp = null,
+        cornerRadiusDp = 24,
+        overlayHorizontalPaddingDp = 20,
+        overlayBottomPaddingDp = 28,
+        overlaySpacingDp = 8,
+        logoHeightDp = 56,
+        titleFontSizeSp = 36,
+        titleLineHeightSp = 42,
+        titleMaxLines = 3,
+        headerHorizontalPaddingDp = 26,
+        headerTopPaddingDp = 12,
+        headerBottomPaddingDp = 10,
+        headerAvatarSizeDp = 38,
+        headerSearchSizeDp = 26,
+    )
+}
+
 private val BottomScrim = Brush.verticalGradient(
     colorStops = arrayOf(
         0.00f to Color.Transparent,
@@ -72,18 +144,24 @@ fun MobileHeroBanner(
     rating: String = "",
     logoUrl: String? = null,
     onClick: (() -> Unit)? = null,
+    layoutMode: MobileHeroLayoutMode = MobileHeroLayoutMode.PORTRAIT_POSTER,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val spec = mobileHeroLayoutSpec(layoutMode)
+    val bannerShape = RoundedCornerShape(spec.cornerRadiusDp.dp)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(3f / 4f)
-            .shadow(elevation = 8.dp, shape = BannerShape, clip = false)
-            .clip(BannerShape)
+            .then(
+                spec.cardHeightDp?.let { heightDp -> Modifier.height(heightDp.dp) }
+                    ?: Modifier.aspectRatio(3f / 4f)
+            )
+            .shadow(elevation = 8.dp, shape = bannerShape, clip = false)
+            .clip(bannerShape)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .border(width = 1.dp, color = CardBorder, shape = BannerShape)
+            .border(width = 1.dp, color = CardBorder, shape = bannerShape)
     ) {
         // ── Layer 1: Full-bleed background image ────────────────────────────
         AsyncImage(
@@ -112,10 +190,10 @@ fun MobileHeroBanner(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(horizontal = spec.overlayHorizontalPaddingDp.dp)
+                .padding(bottom = spec.overlayBottomPaddingDp.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(spec.overlaySpacingDp.dp)
         ) {
             // Element A — Logo image when available, otherwise large title text
             if (logoUrl != null) {
@@ -130,18 +208,18 @@ fun MobileHeroBanner(
                     contentScale = ContentScale.Fit,
                     alignment = Alignment.Center,
                     modifier = Modifier
-                        .height(56.dp)
+                        .height(spec.logoHeightDp.dp)
                         .fillMaxWidth()
                 )
             } else {
                 Text(
                     text = title,
                     color = Color.White,
-                    fontSize = 36.sp,
+                    fontSize = spec.titleFontSizeSp.sp,
                     fontWeight = FontWeight.Bold,
-                    lineHeight = 42.sp,
+                    lineHeight = spec.titleLineHeightSp.sp,
                     textAlign = TextAlign.Center,
-                    maxLines = 3,
+                    maxLines = spec.titleMaxLines,
                     overflow = TextOverflow.Ellipsis
                 )
             }
