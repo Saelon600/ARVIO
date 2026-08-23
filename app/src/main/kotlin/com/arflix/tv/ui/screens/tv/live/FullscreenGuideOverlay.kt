@@ -79,11 +79,21 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private enum class GuideProgramState {
+internal enum class GuideProgramState {
     PastPlayable,
     PastUnavailable,
     Live,
     Future,
+}
+
+internal fun guideProgramActionTarget(
+    state: GuideProgramState,
+    program: IptvProgram,
+): IptvProgram? = when (state) {
+    GuideProgramState.PastPlayable,
+    GuideProgramState.Live -> program
+    GuideProgramState.PastUnavailable,
+    GuideProgramState.Future -> null
 }
 
 private data class GuideProgramItem(
@@ -380,12 +390,8 @@ private fun FullscreenGuideContent(
                         focusRequester = if (index == anchorIndex) anchorFocusRequester else null,
                         isTouchDevice = isTouchDevice,
                         onClick = {
-                            when (item.state) {
-                                GuideProgramState.PastPlayable -> onProgramSelect(item.program)
-                                GuideProgramState.PastUnavailable -> Unit
-                                GuideProgramState.Live -> onProgramSelect(null)
-                                GuideProgramState.Future -> Unit
-                            }
+                            guideProgramActionTarget(item.state, item.program)
+                                ?.let(onProgramSelect)
                         },
                     )
                 }

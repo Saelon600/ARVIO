@@ -487,7 +487,12 @@ fun EpgGrid(
                                 nowNext = nowNext[ch.id],
                                 isFavorite = ch.id in favorites,
                                 stripe = idx % 2 == 1,
-                                onClick = { onChannelSelect(ch, null) },
+                                onClick = {
+                                    onChannelSelect(
+                                        ch,
+                                        channelRowActionProgram(nowNext[ch.id], clockTickMillis),
+                                    )
+                                },
                                 onFocused = {
                                     val pendingId = pendingChannelFocusId
                                     if (pendingId != null && pendingId != ch.id) {
@@ -732,11 +737,11 @@ private fun ProgramsRow(
                     focusable = isFocusable,
                     isCatchupSupported = isCatchupSupported,
                     onClick = {
-                        if (placementIsPast && isCatchupSupported) {
-                            onClick(placement.program)
-                        } else if (!placementIsPast) {
-                            onClick(null)
-                        }
+                        epgProgramActionTarget(
+                            program = placement.program,
+                            isPast = placementIsPast,
+                            isCatchupSupported = isCatchupSupported,
+                        )?.let(onClick)
                     },
                     onFocused = onFocused,
                     onMoveLeft = {
@@ -857,6 +862,21 @@ private data class ProgramFocusTarget(val startMin: Int, val endMin: Int) {
         anchorStartMin > endMin -> anchorStartMin - endMin
         else -> 0
     }
+}
+
+internal fun channelRowActionProgram(
+    guide: IptvNowNext?,
+    clockTickMillis: Long,
+): IptvProgram? = guide?.now?.takeIf { it.isLive(clockTickMillis) }
+
+internal fun epgProgramActionTarget(
+    program: IptvProgram,
+    isPast: Boolean,
+    isCatchupSupported: Boolean,
+): IptvProgram? = when {
+    !isPast -> program
+    isCatchupSupported -> program
+    else -> null
 }
 
 private fun ProgramPlacement.isCatchupSupported(channel: EnrichedChannel, nowMillis: Long): Boolean {

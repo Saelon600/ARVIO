@@ -93,10 +93,11 @@ upload.keystore
 *.swp
 *~
 
-# Internal planning artifacts (not needed for OSS runtime/build)
+# Internal planning and reverse-engineering artifacts (not needed for OSS runtime/build)
 .planning/
 .claude/
 .codex
+/reference/
 
 # Mac files
 .DS_Store

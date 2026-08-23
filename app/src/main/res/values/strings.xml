@@ -878,7 +878,7 @@
     <string name="live_badge_new">NEW</string>
     <string name="live_badge_ch">CH</string>
     <string name="epg_watch_live">Watch Live</string>
-    <string name="epg_search_sources">Search Sources</string>
+    <string name="epg_search_sources">Stream Now</string>
     <string name="live_label_ch">CH %1$d</string>
     <string name="live_label_sources">%1$d sources</string>
     <string name="live_label_matches">%1$d matches</string>

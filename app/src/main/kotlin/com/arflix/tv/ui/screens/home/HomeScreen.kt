@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Info
@@ -3802,7 +3803,6 @@ private fun ContentRow(
                         )
                     }
                 }
-                }
             }
             // "View All" button at end of row when more items are available
             if (effectiveCategoryHasMore) {
@@ -3810,10 +3810,10 @@ private fun ContentRow(
                     ViewAllButton(
                         categoryId = category.id,
                         onClick = onNavigateToViewAll,
-                        modifier = Modifier
-                            .padding(top = 8.dp, bottom = 8.dp)
+                        modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
                     )
                 }
+            }
             }
             if (railFocusOverlayActive) {
                 ArvioFocusableSurface(
@@ -3845,27 +3845,18 @@ private fun ContentRow(
 private fun ViewAllButton(
     categoryId: String,
     onClick: (String) -> Unit,
+    isFocusedOverride: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val isFocused = remember { mutableStateOf(false) }
-    
     ArvioFocusableSurface(
         modifier = modifier
             .width(140.dp)
-            .height(60.dp)
-            .then(ArvioFocusableSurface.focusProperties(
-                onFocusChange = isFocused::setValue,
-                focusedScale = 1.05f,
-                pressedScale = 0.95f
-            )),
+            .height(60.dp),
         shape = RoundedCornerShape(8.dp),
-        backgroundColor = if (isFocused.value) ArvioSkin.colors.surfaceHighlight else ArvioSkin.colors.surface,
-        outlineColor = if (isFocused.value) ArvioSkin.colors.focusOutline else Color.Transparent,
-        outlineWidth = if (isFocused.value) 2.dp else 0.dp,
-        animateFocus = true,
+        backgroundColor = ArvioSkin.colors.surfaceRaised,
+        isFocusedOverride = isFocusedOverride,
         onClick = { onClick(categoryId) }
-    ) {
+    ) { isFocused ->
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -3875,15 +3866,14 @@ private fun ViewAllButton(
         ) {
             Text(
                 text = stringResource(R.string.view_all),
-                style = MaterialTheme.typography.labelLarge,
-                color = if (isFocused.value) ArvioSkin.colors.primary else Color.White,
-                fontWeight = FontWeight.Bold
+                style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 14.sp),
+                color = if (isFocused) ArvioSkin.colors.accent else ArvioSkin.colors.textPrimary
             )
             Spacer(modifier = Modifier.width(8.dp))
             Icon(
                 imageVector = Icons.Default.ArrowForward,
                 contentDescription = null,
-                tint = if (isFocused.value) ArvioSkin.colors.primary else Color.White
+                tint = if (isFocused) ArvioSkin.colors.accent else ArvioSkin.colors.textPrimary
             )
         }
     }

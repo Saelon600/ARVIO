@@ -10,6 +10,8 @@ import com.arflix.tv.data.model.IptvSnapshot
 import com.arflix.tv.data.repository.CloudSyncRepository
 import com.arflix.tv.data.repository.IptvConfig
 import com.arflix.tv.ui.screens.tv.live.LiveTvGuideSources
+import com.arflix.tv.ui.screens.tv.live.epgChannelAllowsVodSearch
+import com.arflix.tv.ui.screens.tv.live.selectConfidentEpgVodMatch
 import com.arflix.tv.data.repository.IptvPlaybackTarget
 import com.arflix.tv.data.repository.IptvPlaybackUrlResolver
 import com.arflix.tv.data.repository.IptvRepository
@@ -90,12 +92,19 @@ class TvViewModel @Inject constructor(
 ) : ViewModel() {
 
     /**
-     * Search TMDB for a program title from the EPG and return the first match.
-     * Used by the "Search Sources" action in the EPG (Channels DVR-style feature).
+     * Resolve an EPG title to a confident TMDB movie/series match.
+     * Sports/news/shopping channel groups are rejected before any metadata call,
+     * and fuzzy first-result matches are not treated as VOD.
      */
-    suspend fun searchProgramOnTmdb(title: String): com.arflix.tv.data.model.MediaItem? {
-        val results = mediaRepository.search(title)
-        return results.firstOrNull { it.mediaType == com.arflix.tv.data.model.MediaType.TV || it.mediaType == com.arflix.tv.data.model.MediaType.MOVIE }
+    suspend fun findEpgVodMatch(
+        title: String,
+        description: String?,
+        channelName: String,
+        channelGroup: String,
+    ): com.arflix.tv.data.model.MediaItem? {
+        if (!epgChannelAllowsVodSearch(channelName, channelGroup)) return null
+        val results = runCatching { mediaRepository.search(title) }.getOrDefault(emptyList())
+        return selectConfidentEpgVodMatch(title, results, description)
     }
 
     private val _uiState = MutableStateFlow(TvUiState())

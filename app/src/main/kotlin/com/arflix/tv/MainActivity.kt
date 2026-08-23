@@ -612,6 +612,11 @@ fun ArflixApp(
     val navController = rememberNavController()
     val appCoroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     var lastAddonsSyncKey by remember { mutableStateOf<String?>(null) }
+    // Read default startup page directly from DataStore (ArflixApp has no access
+    // to the Activity-scoped state).
+    val defaultStartupPage by remember {
+        context.settingsDataStore.data.map { it[DEFAULT_STARTUP_PAGE_KEY] ?: "home" }
+    }.collectAsStateWithLifecycle(initialValue = "home")
 
     LaunchedEffect(authState, activeProfile?.id) {
         if (authState is AuthState.NotAuthenticated) {
