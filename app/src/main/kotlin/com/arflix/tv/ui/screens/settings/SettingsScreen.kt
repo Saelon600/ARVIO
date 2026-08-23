@@ -75,6 +75,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.LiveTv
@@ -178,6 +179,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.arflix.tv.data.model.CatalogConfig
+import com.arflix.tv.data.model.isVisibleOnHome
 import com.arflix.tv.data.model.CatalogDiscoveryResult
 import com.arflix.tv.data.model.CatalogKind
 import com.arflix.tv.data.model.CatalogPackManifest
@@ -395,7 +397,8 @@ fun SettingsScreen(
 
     // Sub-focus for addon rows: 0 = toggle, 1 = delete
     var addonActionIndex by remember { mutableIntStateOf(0) }
-    // Sub-focus for catalog rows: 0 = edit, 1 = up, 2 = down, 3 = layout, 4 = delete
+    // Sub-focus for catalog rows: 0 = edit, 1 = up, 2 = down, 3 = layout,
+    // 4 = visibility, 5 = unpack, 6 = delete
     var catalogActionIndex by remember { mutableIntStateOf(0) }
     // Sub-focus for IPTV playlist rows: 0 = categories, 1 = enable, 2 = edit, 3 = up, 4 = down, 5 = delete
     // For IPTV category rows: 0 = visibility, 1 = up, 2 = down
@@ -873,7 +876,7 @@ fun SettingsScreen(
                                         iptvActionIndex++
                                     } else if (currentSection == "iptv" && !showIptvCategoriesSettings && contentFocusIndex in 2..(uiState.iptvPlaylists.size + 1) && iptvActionIndex < 5) {
                                         iptvActionIndex++
-                                    } else if (currentSection == "catalogs" && contentFocusIndex > 1 && catalogActionIndex < 5) {
+                                    } else if (currentSection == "catalogs" && contentFocusIndex > 1 && catalogActionIndex < 6) {
                                         catalogActionIndex++
                                     }
                                 }
@@ -1137,7 +1140,11 @@ fun SettingsScreen(
                                                                 toggleCatalogueRowLayoutMode(context, catalogueLayoutRowKey(catalog))
                                                             }
                                                         }
-                                                        4 -> {
+                                                        4 -> viewModel.setCatalogVisibility(
+                                                            catalog.id,
+                                                            !catalog.isVisibleOnHome,
+                                                        )
+                                                        5 -> {
                                                             if (catalog.packId != null && catalog.isBulkDeletablePack) {
                                                                 viewModel.unpackCatalog(catalog.id)
                                                             }
@@ -1739,6 +1746,9 @@ fun SettingsScreen(
                                 } else {
                                     viewModel.removeCatalog(catalog.id)
                                 }
+                            },
+                            onSetCatalogVisibility = { catalog, visible ->
+                                viewModel.setCatalogVisibility(catalog.id, visible)
                             },
                             onUnpackCatalog = { catalog -> viewModel.unpackCatalog(catalog.id) }
                         )
@@ -4584,6 +4594,9 @@ private fun MobileSettingsSubPage(
                     onMoveCatalogUp = { viewModel.moveCatalogUp(it.id) },
                     onMoveCatalogDown = { viewModel.moveCatalogDown(it.id) },
                     onDeleteCatalog = onDeleteCatalogClick,
+                    onSetCatalogVisibility = { catalog, visible ->
+                        viewModel.setCatalogVisibility(catalog.id, visible)
+                    },
                     onUnpackCatalog = { viewModel.unpackCatalog(it.id) }
                 )
             }
@@ -7901,6 +7914,7 @@ private fun CatalogsSettings(
     onMoveCatalogUp: (CatalogConfig) -> Unit,
     onMoveCatalogDown: (CatalogConfig) -> Unit,
     onDeleteCatalog: (CatalogConfig) -> Unit,
+    onSetCatalogVisibility: (CatalogConfig, Boolean) -> Unit,
     onUnpackCatalog: (CatalogConfig) -> Unit
 ) {
     val isMobile = LocalDeviceType.current.isTouchDevice()
@@ -7932,6 +7946,7 @@ private fun CatalogsSettings(
                 MobileSettingsCategory(title = stringResource(R.string.settings_section_my_catalogs)) {
                     catalogs.forEachIndexed { index, catalog ->
                         val title = if (catalog.isPreinstalled) { when (catalog.kind) { CatalogKind.COLLECTION -> stringResource(R.string.settings_title_builtin_collection, catalog.title); CatalogKind.COLLECTION_RAIL -> stringResource(R.string.settings_title_builtin_rail, catalog.title); else -> stringResource(R.string.settings_title_builtin, catalog.title) } } else catalog.title
+                        val rowVisible = catalog.isVisibleOnHome
                         val currentPackId = catalog.packId
                         val prevPackId = if (index > 0) catalogs[index - 1].packId else null
                         val showPackHeader = currentPackId != null && currentPackId != prevPackId && catalog.isBulkDeletablePack
@@ -7955,7 +7970,8 @@ private fun CatalogsSettings(
                                 catalog.sourceType == CatalogSourceType.HOME_SERVER -> stringResource(R.string.settings_from_home_server)
                                 else -> catalog.sourceUrl ?: stringResource(R.string.settings_custom_catalog)
                             }
-                            "Pack: ${catalog.effectivePackName} • $baseSubtitle"
+                            (if (rowVisible) "" else "Hidden • ") +
+                                "Pack: ${catalog.effectivePackName} • $baseSubtitle"
                         }
                         val isSelected = selectedIds.contains(catalog.id)
                         val layoutToggleEnabled = catalog.kind != CatalogKind.COLLECTION_RAIL
@@ -8005,10 +8021,28 @@ private fun CatalogsSettings(
                                     Spacer(modifier = Modifier.width(16.dp))
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(title, style = ArflixTypography.cardTitle.copy(fontSize = 16.sp), color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(title, style = ArflixTypography.cardTitle.copy(fontSize = 16.sp), color = if (rowVisible) TextPrimary else TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(subtitle, style = ArflixTypography.caption.copy(fontSize = 13.sp), color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                                 if (!selectionMode) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clickable { onSetCatalogVisibility(catalog, !rowVisible) }
+                                            .background(
+                                                if (rowVisible) Color.White.copy(alpha = 0.08f) else Pink.copy(alpha = 0.18f),
+                                                RoundedCornerShape(8.dp),
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = if (rowVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = if (rowVisible) "Hide home row" else "Show home row",
+                                            tint = if (rowVisible) Color.White.copy(alpha = 0.7f) else Pink,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     CatalogueRowLayoutToggleButton(rowKey = layoutRowKey, enabled = layoutToggleEnabled)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     if (catalog.packId != null && catalog.isBulkDeletablePack) {
@@ -8091,6 +8125,7 @@ private fun CatalogsSettings(
                 }
 
                 val title = if (catalog.isPreinstalled) { when (catalog.kind) { CatalogKind.COLLECTION -> stringResource(R.string.settings_title_builtin_collection, catalog.title); CatalogKind.COLLECTION_RAIL -> stringResource(R.string.settings_title_builtin_rail, catalog.title); else -> stringResource(R.string.settings_title_builtin, catalog.title) } } else catalog.title
+                val rowVisible = catalog.isVisibleOnHome
                 val collectionFallback = stringResource(R.string.settings_collection_fallback)
                 val addonFallback = stringResource(R.string.settings_source_addon)
                 val subtitle = run {
@@ -8111,7 +8146,8 @@ private fun CatalogsSettings(
                         catalog.sourceType == CatalogSourceType.HOME_SERVER -> stringResource(R.string.settings_from_home_server)
                         else -> catalog.sourceUrl ?: stringResource(R.string.settings_custom_catalog)
                     }
-                    "Pack: ${catalog.effectivePackName} • $baseSubtitle"
+                    (if (rowVisible) "" else "Hidden • ") +
+                        "Pack: ${catalog.effectivePackName} • $baseSubtitle"
                 }
                 val isSelected = selectedIds.contains(catalog.id)
                 val layoutToggleEnabled = catalog.kind != CatalogKind.COLLECTION_RAIL
@@ -8119,7 +8155,7 @@ private fun CatalogsSettings(
                 val focusRingColor = resolveAccentColor(fallback = Pink)
                 Row(modifier = Modifier.settingsFocusSlot(rowFocusIndex).fillMaxWidth().background(if (isSelected) Pink.copy(alpha = 0.2f) else if (isRowFocused) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp)).border(width = if (isRowFocused) 2.dp else 0.dp, color = if (isRowFocused) focusRingColor else Color.Transparent, shape = RoundedCornerShape(12.dp)).clickable { onRenameCatalog(catalog) }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(title, style = ArflixTypography.cardTitle.copy(fontSize = 16.sp), color = if (isRowFocused || isSelected) TextPrimary else TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(title, style = ArflixTypography.cardTitle.copy(fontSize = 16.sp), color = if (!rowVisible) TextSecondary.copy(alpha = 0.65f) else if (isRowFocused || isSelected) TextPrimary else TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(subtitle, style = ArflixTypography.caption.copy(fontSize = 13.sp), color = TextSecondary.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -8131,9 +8167,11 @@ private fun CatalogsSettings(
                     Spacer(modifier = Modifier.width(6.dp))
                     CatalogueRowLayoutToggleButton(rowKey = layoutRowKey, enabled = layoutToggleEnabled, forceFocused = isRowFocused && focusedActionIndex == 3)
                     Spacer(modifier = Modifier.width(6.dp))
-                    CatalogActionChip(icon = Icons.Default.Unarchive, isFocused = isRowFocused && focusedActionIndex == 4, enabled = catalog.packId != null && catalog.isBulkDeletablePack, onClick = { onUnpackCatalog(catalog) })
+                    CatalogActionChip(icon = if (rowVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, isFocused = isRowFocused && focusedActionIndex == 4, onClick = { onSetCatalogVisibility(catalog, !rowVisible) })
                     Spacer(modifier = Modifier.width(6.dp))
-                    CatalogActionChip(icon = Icons.Default.Delete, isFocused = isRowFocused && focusedActionIndex == 5, isDestructive = true, enabled = true, onClick = { onDeleteCatalog(catalog) })
+                    CatalogActionChip(icon = Icons.Default.Unarchive, isFocused = isRowFocused && focusedActionIndex == 5, enabled = catalog.packId != null && catalog.isBulkDeletablePack, onClick = { onUnpackCatalog(catalog) })
+                    Spacer(modifier = Modifier.width(6.dp))
+                    CatalogActionChip(icon = Icons.Default.Delete, isFocused = isRowFocused && focusedActionIndex == 6, isDestructive = true, enabled = true, onClick = { onDeleteCatalog(catalog) })
                 }
                 Spacer(modifier = Modifier.height(10.dp))
             }

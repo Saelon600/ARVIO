@@ -65,7 +65,7 @@ class CatalogPackTest {
         val repository = spyk(CatalogRepository(context, profileManager, traktApi, okHttpClient, invalidationBus))
 
         val addedCatalogs = mutableListOf<CatalogConfig>()
-        coEvery { repository.getCatalogs() } returns emptyList()
+        coEvery { repository.getCatalogsForSettings() } returns emptyList()
         coEvery { repository["saveCatalogs"](any<List<CatalogConfig>>()) } answers {
             addedCatalogs.addAll(firstArg<List<CatalogConfig>>())
         }
@@ -112,7 +112,7 @@ class CatalogPackTest {
 
         val repository = spyk(CatalogRepository(context, profileManager, traktApi, okHttpClient, invalidationBus))
 
-        coEvery { repository.getCatalogs() } returns emptyList()
+        coEvery { repository.getCatalogsForSettings() } returns emptyList()
         coEvery { repository["saveCatalogs"](any<List<CatalogConfig>>()) } returns Unit
 
         coEvery { repository.validateCatalogUrl(any()) } returns CatalogValidationResult(

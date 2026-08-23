@@ -744,7 +744,7 @@ class CloudSyncRepository @Inject constructor(
         // Catalogs per profile
         val catalogsByProfile = buildMap<String, List<CatalogConfig>> {
             profiles.forEach { profile ->
-                put(profile.id, catalogRepository.getCatalogsForProfile(profile.id))
+                put(profile.id, catalogRepository.getCatalogsForSettingsForProfile(profile.id))
             }
         }
         root.put("catalogsByProfile", JSONObject(gson.toJson(catalogsByProfile)))
@@ -791,7 +791,10 @@ class CloudSyncRepository @Inject constructor(
 
         // Backward compatibility fields (legacy single-profile clients)
         root.put("addons", JSONArray(gson.toJson(sharedAddons)))
-        root.put("catalogs", JSONArray(gson.toJson(catalogRepository.getCatalogs())))
+        // Export hidden rows to the legacy single-profile backup too. Using the
+        // Home-filtered list here would silently delete hidden custom/addon rows
+        // on old restore paths that don't read hidden-ID sets.
+        root.put("catalogs", JSONArray(gson.toJson(catalogRepository.getCatalogsForSettings())))
         root.put(
             "hiddenPreinstalledCatalogs",
             JSONArray(gson.toJson(catalogRepository.getHiddenPreinstalledCatalogIdsForActiveProfile()))

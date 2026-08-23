@@ -19,6 +19,7 @@ import com.arflix.tv.data.model.CatalogSourceType
 import com.arflix.tv.data.model.CatalogValidationResult
 import com.arflix.tv.data.model.Category
 import com.arflix.tv.data.model.SportsAddonCapabilities
+import com.arflix.tv.data.model.isVisibleOnHome
 import com.arflix.tv.data.repository.HomeServerCatalogCandidate
 import com.arflix.tv.R
 import com.arflix.tv.util.CatalogUrlParser
@@ -165,6 +166,52 @@ class CatalogRepository @Inject constructor(
             .distinctUntilChanged()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun observeCatalogsForSettings(): Flow<List<CatalogConfig>> {
+        return profileManager.activeProfileId
+            .flatMapLatest { profileId ->
+                context.settingsDataStore.data.map { prefs ->
+                    readCatalogsForSettingsFromPrefs(profileId, prefs)
+                }
+            }
+            .distinctUntilChanged()
+    }
+
+    suspend fun getCatalogsForSettings(): List<CatalogConfig> {
+        val profileId = activeProfileId()
+        val prefs = context.settingsDataStore.data.first()
+        return sanitizeCollectionCatalogs(readCatalogsForSettingsFromPrefs(profileId, prefs))
+    }
+
+    suspend fun setCatalogVisibility(catalogId: String, visible: Boolean): Boolean {
+        val trimmedId = catalogId.trim()
+        if (trimmedId.isBlank()) return false
+        val profileId = activeProfileId()
+        val prefs = context.settingsDataStore.data.first()
+        val current = readCatalogsForSettingsFromPrefs(profileId, prefs).toMutableList()
+        val index = current.indexOfFirst { it.id == trimmedId }
+        if (index < 0) return false
+        current[index] = current[index].copy(isVisible = visible)
+
+        context.settingsDataStore.edit { mutablePrefs ->
+            mutablePrefs[catalogsKey(profileId)] = gson.toJson(
+                current.distinctBy { it.id }.mapNotNull { normalizeCatalogConfig(it) }
+            )
+
+            fun clearLegacyHidden(key: androidx.datastore.preferences.core.Preferences.Key<String>, decoded: Set<String>) {
+                if (trimmedId !in decoded) return
+                val updated = decoded - trimmedId
+                mutablePrefs[key] = if (updated.isEmpty()) "" else gson.toJson(updated.toList())
+            }
+            clearLegacyHidden(hiddenPreinstalledKey(profileId), decodeHiddenPreinstalled(profileId, mutablePrefs))
+            clearLegacyHidden(hiddenAddonKey(profileId), decodeHiddenAddon(profileId, mutablePrefs))
+            clearLegacyHidden(hiddenHomeServerKey(profileId), decodeHiddenHomeServer(profileId, mutablePrefs))
+        }
+        lastSyncedAddonFingerprint = null
+        invalidationBus.markDirty(CloudSyncScope.CATALOGS, profileId, "set catalog visibility")
+        return true
+    }
+
     private suspend fun activeProfileId(): String {
         return profileManager.getProfileIdSync()
             .ifBlank { profileManager.getProfileId() }
@@ -179,7 +226,13 @@ class CatalogRepository @Inject constructor(
         )
         val resolved = sanitizeCollectionCatalogs(readCatalogsFromPrefs(profileId, prefs))
         // One-time migration/sync for old keys and merged legacy custom entries.
-        if (resolved.isNotEmpty() && resolved != primary) {
+        // Never rewrite a primary list that contains hidden rows with the filtered
+        // Home list, or the Settings visibility toggle would become destructive.
+        if (
+            resolved.isNotEmpty() &&
+            resolved != primary &&
+            primary.none { !it.isVisibleOnHome }
+        ) {
             saveCatalogs(resolved)
         }
         return resolved
@@ -193,6 +246,12 @@ class CatalogRepository @Inject constructor(
         val safeProfileId = profileId.trim().ifBlank { "default" }
         val prefs = context.settingsDataStore.data.first()
         return sanitizeCollectionCatalogs(readCatalogsFromPrefs(safeProfileId, prefs))
+    }
+
+    suspend fun getCatalogsForSettingsForProfile(profileId: String): List<CatalogConfig> {
+        val safeProfileId = profileId.trim().ifBlank { "default" }
+        val prefs = context.settingsDataStore.data.first()
+        return sanitizeCollectionCatalogs(readCatalogsForSettingsFromPrefs(safeProfileId, prefs))
     }
 
     private fun isBundledPreinstalledCatalogId(catalogId: String): Boolean {
@@ -209,7 +268,11 @@ class CatalogRepository @Inject constructor(
             config.sourceType == CatalogSourceType.PREINSTALLED ||
             config.kind == CatalogKind.COLLECTION ||
             config.kind == CatalogKind.COLLECTION_RAIL
-        return if (shouldRefresh) bundled else config
+        return if (shouldRefresh) {
+            bundled.copy(isVisible = config.isVisible)
+        } else {
+            config
+        }
     }
 
     private fun sanitizeCollectionCatalogs(catalogs: List<CatalogConfig>): List<CatalogConfig> {
@@ -354,7 +417,9 @@ class CatalogRepository @Inject constructor(
     suspend fun ensurePreinstalledDefaults(defaultPreinstalled: List<CatalogConfig>): List<CatalogConfig> {
         val profileId = activeProfileId()
         val prefs = context.settingsDataStore.data.first()
-        val hidden = decodeHiddenPreinstalled(profileId, prefs)
+        val persistedAll = readCatalogsForSettingsFromPrefs(profileId, prefs)
+        val hidden = decodeHiddenPreinstalled(profileId, prefs) +
+            persistedAll.filterNot { it.isVisibleOnHome }.map { it.id }
         val effectiveDefaults = if (hidden.isEmpty()) {
             defaultPreinstalled
         } else {
@@ -435,7 +500,12 @@ class CatalogRepository @Inject constructor(
         }
 
         if (existing != merged) {
-            saveCatalogs(merged)
+            saveCatalogs(
+                mergeCatalogRowsForPersistence(
+                    visibleCatalogs = merged,
+                    persistedCatalogs = persistedAll,
+                )
+            )
         }
         return merged
     }
@@ -474,7 +544,7 @@ class CatalogRepository @Inject constructor(
             .distinctBy { it.id }
             .toList()
 
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val desiredById = supportedCatalogs.associateBy { it.id }
         var changed = false
 
@@ -576,7 +646,7 @@ class CatalogRepository @Inject constructor(
         val desiredById = desiredCatalogs.associate { (candidate, config) -> config.id to config }
         val candidateById = desiredCatalogs.associate { (candidate, config) -> config.id to candidate }
 
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         var changed = false
 
         val beforeRemovalSize = current.size
@@ -752,7 +822,7 @@ class CatalogRepository @Inject constructor(
             manifestResult.getOrThrow()
         }
 
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val addedConfigs = mutableListOf<CatalogConfig>()
 
         val manifestId = finalManifest.id ?: return Result.failure(IllegalArgumentException("Manifest missing ID"))
@@ -804,7 +874,7 @@ class CatalogRepository @Inject constructor(
     }
 
     suspend fun removeCatalogPack(packId: String): Result<Unit> {
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val beforeSize = current.size
         current.removeAll { it.packId == packId }
         if (current.size == beforeSize) {
@@ -826,7 +896,7 @@ class CatalogRepository @Inject constructor(
             ?: fallbackMetadata(normalizedUrl, sourceType)
             ?: return Result.failure(IllegalArgumentException(context.getString(R.string.catalog_failed_read_metadata)))
 
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         if (current.any { it.sourceUrl.equals(normalizedUrl, ignoreCase = true) }) {
             return Result.failure(IllegalArgumentException(context.getString(R.string.catalog_already_added)))
         }
@@ -845,7 +915,7 @@ class CatalogRepository @Inject constructor(
     }
 
     suspend fun updateCustomCatalog(catalogId: String, rawUrl: String): Result<CatalogConfig> {
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val index = current.indexOfFirst { it.id == catalogId }
         if (index < 0) return Result.failure(IllegalArgumentException(context.getString(R.string.catalog_not_found)))
         val existing = current[index]
@@ -878,7 +948,7 @@ class CatalogRepository @Inject constructor(
     }
 
     suspend fun removeCustomCatalog(catalogId: String): Result<Unit> {
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val target = current.firstOrNull { it.id == catalogId }
             ?: return Result.failure(IllegalArgumentException(context.getString(R.string.catalog_not_found)))
         val profileId = activeProfileId()
@@ -900,7 +970,7 @@ class CatalogRepository @Inject constructor(
     suspend fun renameCatalog(catalogId: String, newTitle: String): Boolean {
         val trimmed = newTitle.trim()
         if (trimmed.isBlank()) return false
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val index = current.indexOfFirst { it.id == catalogId }
         if (index < 0) return false
         current[index] = current[index].copy(title = trimmed)
@@ -909,7 +979,7 @@ class CatalogRepository @Inject constructor(
     }
 
     suspend fun moveCatalogUp(catalogId: String): Boolean {
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val visible = current.filter { isVisibleCatalogInSettings(it) }
         val visibleIndex = visible.indexOfFirst { it.id == catalogId }
         if (visibleIndex <= 0) return false
@@ -925,7 +995,7 @@ class CatalogRepository @Inject constructor(
     }
 
     suspend fun moveCatalogDown(catalogId: String): Boolean {
-        val current = getCatalogs().toMutableList()
+        val current = getCatalogsForSettings().toMutableList()
         val visible = current.filter { isVisibleCatalogInSettings(it) }
         val visibleIndex = visible.indexOfFirst { it.id == catalogId }
         if (visibleIndex < 0 || visibleIndex >= visible.lastIndex) return false
@@ -1205,6 +1275,7 @@ class CatalogRepository @Inject constructor(
                 val sourceTypeRaw = (row["sourceType"] as? String)?.trim().orEmpty()
                 val sourceType = parseSourceTypeCompat(sourceTypeRaw, sourceUrl, sourceRef)
                 val isPreinstalledRaw = (row["isPreinstalled"] as? Boolean) ?: false
+                val isVisible = row["isVisible"] as? Boolean
                 val isPreinstalled = when {
                     sourceUrl != null -> false
                     sourceType != CatalogSourceType.PREINSTALLED -> false
@@ -1234,7 +1305,8 @@ class CatalogRepository @Inject constructor(
                         collectionTileShape = collectionTileShape,
                         collectionHideTitle = collectionHideTitle,
                         collectionSources = collectionSources,
-                        requiredAddonUrls = requiredAddonUrls
+                        requiredAddonUrls = requiredAddonUrls,
+                        isVisible = isVisible,
                     )
                 )
             }
@@ -1367,6 +1439,58 @@ class CatalogRepository @Inject constructor(
         }
     }
 
+    private fun readCatalogsForSettingsFromPrefs(
+        profileId: String,
+        prefs: Preferences,
+    ): List<CatalogConfig> {
+        val hiddenPreinstalled = decodeHiddenPreinstalled(profileId, prefs)
+        val hiddenAddon = decodeHiddenAddon(profileId, prefs)
+        val hiddenHomeServer = decodeHiddenHomeServer(profileId, prefs)
+        val stored = parseCatalogsJson(prefs[catalogsKey(profileId)]).ifEmpty {
+            if (profileId == "default") {
+                parseCatalogsJson(prefs[legacyDefaultKey]).ifEmpty {
+                    parseCatalogsJson(prefs[legacyGlobalKey])
+                }
+            } else {
+                emptyList()
+            }
+        }
+
+        val all = stored
+            .distinctBy { it.id }
+            .map { config ->
+                val refreshed = refreshBundledPreinstalledCatalog(config)
+                val legacyHidden =
+                    (isPreinstalledCatalog(refreshed) && refreshed.id in hiddenPreinstalled) ||
+                        (refreshed.sourceType == CatalogSourceType.ADDON && refreshed.id in hiddenAddon) ||
+                        (refreshed.sourceType == CatalogSourceType.HOME_SERVER && refreshed.id in hiddenHomeServer)
+                if (legacyHidden) refreshed.copy(isVisible = false) else refreshed
+            }
+            .toMutableList()
+
+        // Older builds physically removed hidden built-in rows from the saved list.
+        // Recreate them in their default relative position so Settings can show an
+        // eye toggle and the user can make them visible again.
+        val defaultOrder = bundledPreinstalledCatalogsById.keys.withIndex()
+            .associate { (index, id) -> id to index }
+        hiddenPreinstalled.forEach { hiddenId ->
+            if (all.any { it.id == hiddenId }) return@forEach
+            val restored = bundledPreinstalledCatalogsById[hiddenId]?.copy(isVisible = false)
+                ?: return@forEach
+            val targetOrder = defaultOrder[hiddenId] ?: Int.MAX_VALUE
+            var insertAt = 0
+            all.forEachIndexed { index, existing ->
+                val existingOrder = defaultOrder[existing.id]
+                if (existingOrder != null && existingOrder < targetOrder) {
+                    insertAt = index + 1
+                }
+            }
+            all.add(insertAt.coerceIn(0, all.size), restored)
+        }
+
+        return all
+    }
+
     private fun readCatalogsFromPrefs(profileId: String, prefs: Preferences): List<CatalogConfig> {
         val hiddenPreinstalled = decodeHiddenPreinstalled(profileId, prefs)
         val hiddenAddon = decodeHiddenAddon(profileId, prefs)
@@ -1386,7 +1510,7 @@ class CatalogRepository @Inject constructor(
             val base = primary
                 .distinctBy { it.id }
                 .map { refreshBundledPreinstalledCatalog(it) }
-                .filterNot { it.isHidden() }
+                .filterNot { it.isHidden() || !it.isVisibleOnHome }
                 .toMutableList()
             val existingKeys = base.map { "${it.id}|${it.sourceUrl.orEmpty()}" }.toMutableSet()
 
@@ -1397,7 +1521,7 @@ class CatalogRepository @Inject constructor(
                     parseCatalogsJson(prefs[legacyGlobalKey])
                 )
                     .filterNot { it.isPreinstalled }
-                    .filterNot { it.isHidden() }
+                    .filterNot { it.isHidden() || !it.isVisibleOnHome }
                     .distinctBy { "${it.id}|${it.sourceUrl.orEmpty()}" }
 
                 legacyCustom.forEach { cfg ->
@@ -1417,7 +1541,7 @@ class CatalogRepository @Inject constructor(
             return legacyDefault
                 .distinctBy { it.id }
                 .map { refreshBundledPreinstalledCatalog(it) }
-                .filterNot { it.isHidden() }
+                .filterNot { it.isHidden() || !it.isVisibleOnHome }
         }
 
         val legacyGlobal = parseCatalogsJson(prefs[legacyGlobalKey])
@@ -1425,7 +1549,7 @@ class CatalogRepository @Inject constructor(
             return legacyGlobal
                 .distinctBy { it.id }
                 .map { refreshBundledPreinstalledCatalog(it) }
-                .filterNot { it.isHidden() }
+                .filterNot { it.isHidden() || !it.isVisibleOnHome }
         }
 
         return emptyList()
@@ -1444,6 +1568,24 @@ class CatalogRepository @Inject constructor(
         private const val ADDON_SOURCE_REF_PREFIX = "addon_catalog|"
 
     }
+}
+
+internal fun mergeCatalogRowsForPersistence(
+    visibleCatalogs: List<CatalogConfig>,
+    persistedCatalogs: List<CatalogConfig>,
+): List<CatalogConfig> {
+    val remainingVisible = visibleCatalogs.associateByTo(LinkedHashMap()) { it.id }
+    val merged = buildList {
+        persistedCatalogs.forEach { persisted ->
+            if (!persisted.isVisibleOnHome) {
+                add(persisted)
+            } else {
+                remainingVisible.remove(persisted.id)?.let(::add)
+            }
+        }
+        addAll(remainingVisible.values)
+    }
+    return merged.distinctBy { it.id }
 }
 
 private fun String.toDisplayTitle(): String {

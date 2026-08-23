@@ -585,6 +585,7 @@ class SettingsViewModel @Inject constructor(
             val audioLanguageOptions = loadAudioLanguageOptions(defaultAudio)
             val existingCatalogs = visibleCatalogs(
                 catalogRepository.ensurePreinstalledDefaults(mediaRepository.getDefaultCatalogConfigs())
+                    .ifEmpty { catalogRepository.getCatalogsForSettings() }
             )
             val watchlistCount = try {
                 watchlistRepository.getLocalWatchlistItems().size
@@ -2015,11 +2016,11 @@ class SettingsViewModel @Inject constructor(
 
     private fun observeCatalogs() {
         viewModelScope.launch {
-            catalogRepository.observeCatalogs().collect {
-                val effectiveCatalogs = catalogRepository.ensurePreinstalledDefaults(mediaRepository.getDefaultCatalogConfigs())
-                val visible = visibleCatalogs(effectiveCatalogs)
-                if (_uiState.value.catalogs != visible) {
-                    _uiState.value = _uiState.value.copy(catalogs = visible)
+            catalogRepository.observeCatalogsForSettings().collect {
+                catalogRepository.ensurePreinstalledDefaults(mediaRepository.getDefaultCatalogConfigs())
+                val settingsRows = visibleCatalogs(catalogRepository.getCatalogsForSettings())
+                if (_uiState.value.catalogs != settingsRows) {
+                    _uiState.value = _uiState.value.copy(catalogs = settingsRows)
                 }
             }
         }
@@ -2222,7 +2223,7 @@ class SettingsViewModel @Inject constructor(
             val result = catalogRepository.removeCustomCatalog(catalogId)
             result.onSuccess {
                 // Refresh the catalog list in UI state after removal
-                val updatedCatalogs = visibleCatalogs(catalogRepository.getCatalogs())
+                val updatedCatalogs = visibleCatalogs(catalogRepository.getCatalogsForSettings())
                 _uiState.value = _uiState.value.copy(
                     catalogs = updatedCatalogs,
                     toastMessage = "Catalog removed",
@@ -2240,7 +2241,7 @@ class SettingsViewModel @Inject constructor(
 
     fun unpackCatalog(catalogId: String) {
         viewModelScope.launch {
-            val current = catalogRepository.getCatalogs()
+            val current = catalogRepository.getCatalogsForSettings()
             val index = current.indexOfFirst { it.id == catalogId }
             if (index != -1) {
                 val target = current[index]
@@ -2282,6 +2283,18 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             catalogRepository.moveCatalogDown(catalogId)
             syncLocalStateToCloud(silent = true)
+        }
+    }
+
+    fun setCatalogVisibility(catalogId: String, visible: Boolean) {
+        viewModelScope.launch {
+            if (catalogRepository.setCatalogVisibility(catalogId, visible)) {
+                _uiState.value = _uiState.value.copy(
+                    toastMessage = if (visible) "Home row shown" else "Home row hidden",
+                    toastType = ToastType.SUCCESS,
+                )
+                syncLocalStateToCloud(silent = true)
+            }
         }
     }
 

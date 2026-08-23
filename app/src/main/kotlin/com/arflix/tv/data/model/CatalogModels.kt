@@ -102,8 +102,14 @@ data class CatalogConfig(
     val collectionSources: List<CollectionSourceConfig> = emptyList(),
     val requiredAddonUrls: List<String> = emptyList(),
     val packId: String? = null,
-    val packName: String? = null
+    val packName: String? = null,
+    // Null preserves compatibility with catalogs saved before row visibility existed.
+    // Only an explicit false hides the row from Home.
+    val isVisible: Boolean? = null
 ) : Serializable
+
+val CatalogConfig.isVisibleOnHome: Boolean
+    get() = isVisible != false
 
 val CatalogConfig.effectivePackId: String
     get() = packId ?: when (sourceType) {
