@@ -157,6 +157,11 @@ internal fun normalizeIptvSortOrder(value: String?): String = when (value?.trim(
     else -> "provider"
 }
 
+internal fun shouldRefreshStartupPlaylist(
+    hasCachedChannels: Boolean,
+    cacheIsStale: Boolean,
+): Boolean = !hasCachedChannels || cacheIsStale
+
 data class IptvConfig(
     val m3uUrl: String = "",
     val epgUrl: String = "",
@@ -2882,14 +2887,19 @@ class IptvRepository @Inject constructor(
             if (!hasAnyConfiguredSource(config)) return
 
             val cached = getMemoryCachedSnapshot() ?: getCachedSnapshotOrNull()
-            if (cached == null || cached.channels.isEmpty()) {
+            val hasCachedChannels = cached?.channels?.isNotEmpty() == true
+            val cacheIsStale = cached?.let(::isSnapshotStale) ?: false
+            if (shouldRefreshStartupPlaylist(hasCachedChannels, cacheIsStale)) {
+                System.err.println(
+                    "[IPTV-AutoRefresh] refreshing startup playlist " +
+                        "cached=$hasCachedChannels stale=$cacheIsStale"
+                )
                 val fresh = withTimeoutOrNull(25_000L) {
                     fetchFreshChannelsForStartup(config)
                 }
                 if (fresh != null) {
                     storeStartupChannels(config, fresh.first, fresh.second)
                 }
-                return
             }
         } finally {
             startupPrefetchInFlight.set(false)

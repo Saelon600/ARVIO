@@ -86,6 +86,19 @@ enum class ToastType {
     SUCCESS, ERROR, INFO
 }
 
+internal data class SettingsIptvRefreshPolicy(
+    val forcePlaylistReload: Boolean,
+    val forceEpgReload: Boolean,
+    val allowNetworkEpgFetch: Boolean,
+)
+
+internal fun settingsIptvRefreshPolicy(force: Boolean): SettingsIptvRefreshPolicy =
+    SettingsIptvRefreshPolicy(
+        forcePlaylistReload = force,
+        forceEpgReload = force,
+        allowNetworkEpgFetch = force,
+    )
+
 data class AiKeyServerState(
     val isActive: Boolean = false,
     val serverUrl: String? = null,
@@ -2439,9 +2452,11 @@ class SettingsViewModel @Inject constructor(
                 runCatching { iptvRepository.purgeAllIptvSourceCaches() }
             }
             runCatching {
+                val refreshPolicy = settingsIptvRefreshPolicy(force)
                 val snapshot = iptvRepository.loadSnapshot(
-                    forcePlaylistReload = force,
-                    forceEpgReload = false,
+                    forcePlaylistReload = refreshPolicy.forcePlaylistReload,
+                    forceEpgReload = refreshPolicy.forceEpgReload,
+                    allowNetworkEpgFetch = refreshPolicy.allowNetworkEpgFetch,
                     onProgress = { progress ->
                         _uiState.value = _uiState.value.copy(
                             isIptvLoading = true,
