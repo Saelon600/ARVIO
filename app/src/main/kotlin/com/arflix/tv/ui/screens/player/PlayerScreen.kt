@@ -504,7 +504,7 @@ fun PlayerScreen(
     var subtitlePanelFocus by remember { mutableIntStateOf(0) } // 0=lang panel, 1=track panel
     // In-player subtitle settings panel state
     var showSubtitleSettings by remember { mutableStateOf(false) }
-    var subtitleSettingsRow by remember { mutableIntStateOf(0) }  // 0=Delay, 1=Size, 2=Vertical
+    var subtitleSettingsRow by remember { mutableIntStateOf(0) }  // 0=Delay, 1=Size, 2=Vertical, 3=Font
     var subtitleSyncOffsetMs by remember { mutableLongStateOf(0L) }
     var subtitleSizePct by remember { mutableIntStateOf(100) }
     var subtitleVerticalPct by remember {
@@ -2862,7 +2862,7 @@ fun PlayerScreen(
                                 true
                             }
                             Key.DirectionDown -> {
-                                subtitleSettingsRow = (subtitleSettingsRow + 1).coerceAtMost(2)
+                                subtitleSettingsRow = (subtitleSettingsRow + 1).coerceAtMost(3)
                                 true
                             }
                             Key.DirectionLeft -> {
@@ -2870,6 +2870,7 @@ fun PlayerScreen(
                                     0 -> subtitleSyncOffsetMs = (subtitleSyncOffsetMs - 100L).coerceAtLeast(-30000L)
                                     1 -> subtitleSizePct = (subtitleSizePct - 10).coerceAtLeast(50)
                                     2 -> subtitleVerticalPct = (subtitleVerticalPct - 1).coerceAtLeast(0)
+                                    3 -> viewModel.cycleSubtitleFont(backwards = true)
                                 }
                                 true
                             }
@@ -2878,6 +2879,7 @@ fun PlayerScreen(
                                     0 -> subtitleSyncOffsetMs = (subtitleSyncOffsetMs + 100L).coerceAtMost(30000L)
                                     1 -> subtitleSizePct = (subtitleSizePct + 10).coerceAtMost(300)
                                     2 -> subtitleVerticalPct = (subtitleVerticalPct + 1).coerceAtMost(50)
+                                    3 -> viewModel.cycleSubtitleFont(backwards = false)
                                 }
                                 true
                             }
@@ -3835,7 +3837,7 @@ fun PlayerScreen(
             }
         }
 
-        // In-player subtitle settings panel (Delay, Size, Vertical Position)
+        // In-player subtitle settings panel (Delay, Size, Vertical Position, Font)
         AnimatedVisibility(
             visible = showSubtitleSettings && hasPlaybackStarted,
             enter = fadeIn(animTween(150)),
@@ -3847,13 +3849,16 @@ fun PlayerScreen(
                 syncOffsetMs = subtitleSyncOffsetMs,
                 sizePct = subtitleSizePct,
                 verticalPct = subtitleVerticalPct,
+                font = uiState.subtitleFont,
                 onRowSelect = { subtitleSettingsRow = it },
                 onOffsetDecrease = { subtitleSyncOffsetMs = (subtitleSyncOffsetMs - 100L).coerceAtLeast(-30000L) },
                 onOffsetIncrease = { subtitleSyncOffsetMs = (subtitleSyncOffsetMs + 100L).coerceAtMost(30000L) },
                 onSizeDecrease = { subtitleSizePct = (subtitleSizePct - 10).coerceAtLeast(50) },
                 onSizeIncrease = { subtitleSizePct = (subtitleSizePct + 10).coerceAtMost(300) },
                 onVerticalDecrease = { subtitleVerticalPct = (subtitleVerticalPct - 1).coerceAtLeast(0) },
-                onVerticalIncrease = { subtitleVerticalPct = (subtitleVerticalPct + 1).coerceAtMost(50) }
+                onVerticalIncrease = { subtitleVerticalPct = (subtitleVerticalPct + 1).coerceAtMost(50) },
+                onFontPrevious = { viewModel.cycleSubtitleFont(backwards = true) },
+                onFontNext = { viewModel.cycleSubtitleFont(backwards = false) }
             )
         }
 
@@ -6257,13 +6262,16 @@ private fun PlayerSubtitleSettingsPanel(
     syncOffsetMs: Long,
     sizePct: Int,
     verticalPct: Int,
+    font: String,
     onRowSelect: (Int) -> Unit,
     onOffsetDecrease: () -> Unit,
     onOffsetIncrease: () -> Unit,
     onSizeDecrease: () -> Unit,
     onSizeIncrease: () -> Unit,
     onVerticalDecrease: () -> Unit,
-    onVerticalIncrease: () -> Unit
+    onVerticalIncrease: () -> Unit,
+    onFontPrevious: () -> Unit,
+    onFontNext: () -> Unit
 ) {
     val accent = LocalAccentColorOverride.current ?: Color.White
 
@@ -6311,6 +6319,15 @@ private fun PlayerSubtitleSettingsPanel(
             onClick = { onRowSelect(2) },
             onDecrease = onVerticalDecrease,
             onIncrease = onVerticalIncrease
+        )
+        PlayerSubtitleSettingRow(
+            label = stringResource(R.string.subtitle_font),
+            value = font,
+            selected = selectedRow == 3,
+            accent = accent,
+            onClick = { onRowSelect(3) },
+            onDecrease = onFontPrevious,
+            onIncrease = onFontNext
         )
     }
 }

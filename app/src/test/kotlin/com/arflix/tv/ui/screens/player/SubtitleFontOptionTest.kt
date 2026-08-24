@@ -36,4 +36,9 @@ class SubtitleFontOptionTest {
             assertThat(SubtitleFontOption.fromPreference(option.preferenceValue)).isEqualTo(option)
         }
     }
+
+    @Test
+    fun previousFromSystemWrapsToRobotoCondensed() {
+        assertThat(SubtitleFontOption.previousPreference("System")).isEqualTo("Roboto Condensed")
+    }
 }

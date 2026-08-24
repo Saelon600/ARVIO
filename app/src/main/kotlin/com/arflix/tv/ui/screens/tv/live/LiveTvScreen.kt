@@ -1224,6 +1224,7 @@ fun LiveTvScreen(
             }
         }
     }
+    val currentEffectiveGuideNowNext by rememberUpdatedState(effectiveGuideNowNext)
 
     val epgAnchorChannelId = epgPrefetchAnchorId
         ?: selectedDisplayChannelId
@@ -1642,7 +1643,7 @@ fun LiveTvScreen(
 
     fun focusProviderSwitcher() {
         noteGuideUserNavigation()
-        if (providerFilters.size <= 1) {
+        if (playlistCategorySections.isNotEmpty() || providerFilters.size <= 1) {
             focusPlaylistSearch()
             return
         }
@@ -1775,6 +1776,13 @@ fun LiveTvScreen(
                 channelGroup = channel.source.group,
             )
             if (!programActionLookupGuard.isCurrent(lookupGeneration)) return@launch
+            if (
+                !epgVodLookupCanPublish(
+                    selectedProgram = program,
+                    currentProgram = currentEffectiveGuideNowNext[channel.id]?.now,
+                    nowMillis = System.currentTimeMillis(),
+                )
+            ) return@launch
             when (vodLookupResolution(match != null)) {
                 EpgInteractionAction.ShowVodDialog -> {
                     programActionVodMatch = match

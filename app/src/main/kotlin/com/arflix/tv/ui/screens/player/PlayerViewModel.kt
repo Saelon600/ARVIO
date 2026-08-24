@@ -3784,6 +3784,21 @@ class PlayerViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(matchToast = null)
     }
 
+    fun cycleSubtitleFont(backwards: Boolean) {
+        val current = _uiState.value.subtitleFont
+        val next = if (backwards) {
+            SubtitleFontOption.previousPreference(current)
+        } else {
+            SubtitleFontOption.nextPreference(current)
+        }
+        _uiState.value = _uiState.value.copy(subtitleFont = next)
+        viewModelScope.launch {
+            context.settingsDataStore.edit { preferences ->
+                preferences[profileManager.profileStringKey("subtitle_font")] = next
+            }
+        }
+    }
+
     fun disableSubtitles() {
         hasManualSubtitleSelection = true
         // Turning subtitles Off is an explicit user action — stop any running "Find best match"/

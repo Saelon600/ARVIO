@@ -18,5 +18,10 @@ enum class SubtitleFontOption(val preferenceValue: String) {
             val current = fromPreference(value)
             return entries[(current.ordinal + 1) % entries.size].preferenceValue
         }
+
+        fun previousPreference(value: String?): String {
+            val current = fromPreference(value)
+            return entries[(current.ordinal - 1 + entries.size) % entries.size].preferenceValue
+        }
     }
 }

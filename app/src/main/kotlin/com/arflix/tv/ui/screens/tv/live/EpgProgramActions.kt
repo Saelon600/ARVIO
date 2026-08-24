@@ -120,6 +120,16 @@ internal class EpgVodLookupGuard {
     fun isCurrent(lookupGeneration: Int): Boolean = lookupGeneration == generation
 }
 
+internal fun epgVodLookupCanPublish(
+    selectedProgram: IptvProgram,
+    currentProgram: IptvProgram?,
+    nowMillis: Long,
+): Boolean = currentProgram != null &&
+    currentProgram.title == selectedProgram.title &&
+    currentProgram.startUtcMillis == selectedProgram.startUtcMillis &&
+    currentProgram.endUtcMillis == selectedProgram.endUtcMillis &&
+    currentProgram.isLive(nowMillis)
+
 internal fun epgChannelAllowsVodSearch(
     channelName: String,
     channelGroup: String,
