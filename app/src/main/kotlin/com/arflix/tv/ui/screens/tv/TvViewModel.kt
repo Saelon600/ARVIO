@@ -18,6 +18,8 @@ import com.arflix.tv.data.repository.IptvRepository
 import com.arflix.tv.data.repository.IptvTvSessionState
 import com.arflix.tv.network.OkHttpProvider
 import com.arflix.tv.util.AppLogger
+import com.arflix.tv.util.IPTV_EPG_VOD_ACTIONS_ENABLED_KEY
+import com.arflix.tv.util.settingsDataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +31,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
@@ -74,6 +77,7 @@ data class TvUiState(
     val epgLoadingChannelIds: Set<String> = emptySet(),
     val epgAttemptedChannelIds: Set<String> = emptySet(),
     val epgBackfillInProgress: Boolean = false,
+    val epgVodActionsEnabled: Boolean = true,
 ) {
     val isConfigured: Boolean get() =
         config.m3uUrl.isNotBlank() ||
@@ -93,7 +97,7 @@ class TvViewModel @Inject constructor(
 
     /**
      * Resolve an EPG title to a confident TMDB movie/series match.
-     * Sports/news/shopping channel groups are rejected before any metadata call,
+     * Sports/news/shopping channel names are rejected before any metadata call,
      * and fuzzy first-result matches are not treated as VOD.
      */
     suspend fun findEpgVodMatch(
@@ -179,6 +183,7 @@ class TvViewModel @Inject constructor(
     init {
         observeConfigAndFavorites()
         observeTvSession()
+        observeEpgVodActionsPreference()
         viewModelScope.launch {
             runCatching { iptvRepository.warmupFromCacheOnly() }
             // Try fast non-blocking in-memory read first; fall back to mutex-guarded disk read
@@ -240,6 +245,17 @@ class TvViewModel @Inject constructor(
                 refresh(force = false, showLoading = false, forceEpg = false)
             }
             startPeriodicEpgRefresh()
+        }
+    }
+
+    private fun observeEpgVodActionsPreference() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { preferences -> preferences[IPTV_EPG_VOD_ACTIONS_ENABLED_KEY] ?: true }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    setUiState(_uiState.value.copy(epgVodActionsEnabled = enabled))
+                }
         }
     }
 

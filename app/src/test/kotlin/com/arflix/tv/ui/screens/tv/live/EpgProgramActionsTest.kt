@@ -150,6 +150,166 @@ class EpgProgramActionsTest {
     }
 
     @Test
+    fun broadPlaylistGroupDoesNotBlockMovieChannelVodLookup() {
+        assertThat(
+            epgChannelAllowsVodSearch(
+                channelName = "Lifetime Movies",
+                channelGroup = "News & Entertainment",
+            )
+        ).isTrue()
+    }
+
+    @Test
+    fun dedicatedSportsGroupBlocksAcronymChannelVodLookup() {
+        assertThat(
+            epgChannelAllowsVodSearch(
+                channelName = "ESPN",
+                channelGroup = "US Sports",
+            )
+        ).isFalse()
+    }
+
+    @Test
+    fun fatalAttractionUsesDescriptionYearToSelectMovie() {
+        val olderTvShow = MediaItem(id = 1, title = "Fatal Attraction", year = "2013", mediaType = MediaType.TV)
+        val movie = MediaItem(id = 2, title = "Fatal Attraction", year = "1987", mediaType = MediaType.MOVIE)
+        val newerTvShow = MediaItem(id = 3, title = "Fatal Attraction", year = "2023", mediaType = MediaType.TV)
+
+        assertThat(
+            selectConfidentEpgVodMatch(
+                programTitle = "Fatal Attraction",
+                programDescription = "Michael Douglas and Glenn Close star in the 1987 thriller.",
+                results = listOf(olderTvShow, movie, newerTvShow),
+            )
+        ).isEqualTo(movie)
+    }
+
+    @Test
+    fun ambiguousExactTitlesWithoutYearAreRejected() {
+        val movie = MediaItem(id = 1, title = "Fatal Attraction", year = "1987", mediaType = MediaType.MOVIE)
+        val series = MediaItem(id = 2, title = "Fatal Attraction", year = "2023", mediaType = MediaType.TV)
+
+        assertThat(
+            selectConfidentEpgVodMatch(
+                programTitle = "Fatal Attraction",
+                results = listOf(movie, series),
+            )
+        ).isNull()
+    }
+
+    @Test
+    fun channelRowFirstClickTunesLiveMiniPlayer() {
+        assertThat(
+            channelRowInteractionAction(
+                isSamePlayingChannel = false,
+                hasCurrentProgram = true,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.PlayLiveMini)
+    }
+
+    @Test
+    fun channelRowSecondClickResolvesVodWhenCurrentProgramExists() {
+        assertThat(
+            channelRowInteractionAction(
+                isSamePlayingChannel = true,
+                hasCurrentProgram = true,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.ResolveVodOrPlayFullscreen)
+    }
+
+    @Test
+    fun channelRowSecondClickWithoutEpgPlaysLiveFullscreen() {
+        assertThat(
+            channelRowInteractionAction(
+                isSamePlayingChannel = true,
+                hasCurrentProgram = false,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.PlayLiveFullscreen)
+    }
+
+    @Test
+    fun disabledVodActionsMakeSecondChannelClickPlayFullscreen() {
+        assertThat(
+            channelRowInteractionAction(
+                isSamePlayingChannel = true,
+                hasCurrentProgram = true,
+                vodActionsEnabled = false,
+            )
+        ).isEqualTo(EpgInteractionAction.PlayLiveFullscreen)
+    }
+
+    @Test
+    fun liveEpgCellFirstClickTunesLiveMiniPlayer() {
+        assertThat(
+            epgProgramInteractionAction(
+                temporalState = EpgTemporalState.Live,
+                isSamePlayingChannel = false,
+                isCatchupSupported = false,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.PlayLiveMini)
+    }
+
+    @Test
+    fun liveEpgCellSecondClickResolvesVod() {
+        assertThat(
+            epgProgramInteractionAction(
+                temporalState = EpgTemporalState.Live,
+                isSamePlayingChannel = true,
+                isCatchupSupported = false,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.ResolveVodOrPlayFullscreen)
+    }
+
+    @Test
+    fun pastEpgCellWithCatchupStartsCatchup() {
+        assertThat(
+            epgProgramInteractionAction(
+                temporalState = EpgTemporalState.Past,
+                isSamePlayingChannel = true,
+                isCatchupSupported = true,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.PlayCatchup)
+    }
+
+    @Test
+    fun pastEpgCellWithoutCatchupDoesNothing() {
+        assertThat(
+            epgProgramInteractionAction(
+                temporalState = EpgTemporalState.Past,
+                isSamePlayingChannel = false,
+                isCatchupSupported = false,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.NoOp)
+    }
+
+    @Test
+    fun futureEpgCellDoesNothingUntilRecordingOrReminderExists() {
+        assertThat(
+            epgProgramInteractionAction(
+                temporalState = EpgTemporalState.Future,
+                isSamePlayingChannel = false,
+                isCatchupSupported = false,
+                vodActionsEnabled = true,
+            )
+        ).isEqualTo(EpgInteractionAction.NoOp)
+    }
+
+    @Test
+    fun vodLookupOnlyShowsDialogForConfidentMatch() {
+        assertThat(vodLookupResolution(hasVodMatch = true))
+            .isEqualTo(EpgInteractionAction.ShowVodDialog)
+        assertThat(vodLookupResolution(hasVodMatch = false))
+            .isEqualTo(EpgInteractionAction.PlayLiveFullscreen)
+    }
+
+    @Test
     fun invalidatedVodLookupCannotPublishItsResult() {
         val guard = EpgVodLookupGuard()
         val staleLookup = guard.beginLookup()

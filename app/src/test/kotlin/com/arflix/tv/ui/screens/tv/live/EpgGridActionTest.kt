@@ -1,6 +1,5 @@
 package com.arflix.tv.ui.screens.tv.live
 
-import com.arflix.tv.data.model.IptvNowNext
 import com.arflix.tv.data.model.IptvProgram
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -19,24 +18,27 @@ class EpgGridActionTest {
             epgProgramActionTarget(
                 program = program,
                 isPast = false,
+                isLive = true,
                 isCatchupSupported = false,
             )
         ).isEqualTo(program)
     }
 
     @Test
-    fun channelNameTapForwardsCurrentlyLiveProgramToDialog() {
+    fun futureProgramDoesNotLeaveGuideUntilRecordingOrReminderExists() {
         val program = IptvProgram(
-            title = "Live Movie",
-            startUtcMillis = 1_000L,
-            endUtcMillis = 2_000L,
+            title = "Tomorrow's Movie",
+            startUtcMillis = 3_000L,
+            endUtcMillis = 4_000L,
         )
 
         assertThat(
-            channelRowActionProgram(
-                guide = IptvNowNext(now = program),
-                clockTickMillis = 1_500L,
+            epgProgramActionTarget(
+                program = program,
+                isPast = false,
+                isLive = false,
+                isCatchupSupported = false,
             )
-        ).isEqualTo(program)
+        ).isNull()
     }
 }

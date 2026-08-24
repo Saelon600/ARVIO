@@ -32,11 +32,69 @@ private val NON_VOD_EPG_CHANNEL_TERMS = setOf(
     "teleshopping",
 )
 
+private val MIXED_ENTERTAINMENT_GROUP_TERMS = setOf(
+    "entertainment",
+    "movie",
+    "movies",
+    "film",
+    "films",
+    "cinema",
+    "series",
+    "general",
+)
+
 internal enum class EpgProgramSelectionOutcome {
     PlayLive,
     PlayCatchup,
     ShowDialog,
 }
+
+internal enum class EpgTemporalState {
+    Live,
+    Past,
+    Future,
+}
+
+internal enum class EpgInteractionAction {
+    PlayLiveMini,
+    PlayLiveFullscreen,
+    PlayCatchup,
+    ResolveVodOrPlayFullscreen,
+    ShowVodDialog,
+    NoOp,
+}
+
+internal fun channelRowInteractionAction(
+    isSamePlayingChannel: Boolean,
+    hasCurrentProgram: Boolean,
+    vodActionsEnabled: Boolean,
+): EpgInteractionAction = when {
+    !isSamePlayingChannel -> EpgInteractionAction.PlayLiveMini
+    vodActionsEnabled && hasCurrentProgram -> EpgInteractionAction.ResolveVodOrPlayFullscreen
+    else -> EpgInteractionAction.PlayLiveFullscreen
+}
+
+internal fun epgProgramInteractionAction(
+    temporalState: EpgTemporalState,
+    isSamePlayingChannel: Boolean,
+    isCatchupSupported: Boolean,
+    vodActionsEnabled: Boolean,
+): EpgInteractionAction = when (temporalState) {
+    EpgTemporalState.Past -> if (isCatchupSupported) {
+        EpgInteractionAction.PlayCatchup
+    } else {
+        EpgInteractionAction.NoOp
+    }
+    EpgTemporalState.Future -> EpgInteractionAction.NoOp
+    EpgTemporalState.Live -> when {
+        !isSamePlayingChannel -> EpgInteractionAction.PlayLiveMini
+        vodActionsEnabled -> EpgInteractionAction.ResolveVodOrPlayFullscreen
+        else -> EpgInteractionAction.PlayLiveFullscreen
+    }
+}
+
+internal fun vodLookupResolution(hasVodMatch: Boolean): EpgInteractionAction =
+    if (hasVodMatch) EpgInteractionAction.ShowVodDialog else EpgInteractionAction.PlayLiveFullscreen
 
 internal fun epgProgramSelectionOutcome(
     isPastPlayable: Boolean,
@@ -66,11 +124,24 @@ internal fun epgChannelAllowsVodSearch(
     channelName: String,
     channelGroup: String,
 ): Boolean {
-    val channelTokens = "$channelName $channelGroup"
+    // Playlist group labels are often broad combinations such as
+    // "News & Entertainment". A broad mixed label must not reject a movie
+    // channel, while a dedicated Sports/News group should still fail closed.
+    // Exact title matching remains the final guard against false positives.
+    val channelTokens = channelName
         .lowercase()
         .split(Regex("[^a-z0-9]+"))
         .filterTo(mutableSetOf()) { it.isNotBlank() }
-    return channelTokens.none { it in NON_VOD_EPG_CHANNEL_TERMS }
+    if (channelTokens.any { it in NON_VOD_EPG_CHANNEL_TERMS }) return false
+
+    val groupTokens = channelGroup
+        .lowercase()
+        .split(Regex("[^a-z0-9]+"))
+        .filterTo(mutableSetOf()) { it.isNotBlank() }
+    val dedicatedNonVodGroup =
+        groupTokens.any { it in NON_VOD_EPG_CHANNEL_TERMS } &&
+            groupTokens.none { it in MIXED_ENTERTAINMENT_GROUP_TERMS }
+    return !dedicatedNonVodGroup
 }
 
 private val EPG_TITLE_YEAR_SUFFIX = Regex("""\s*\(?\b(?:19|20)\d{2}\b\)?\s*$""")
@@ -97,8 +168,8 @@ internal fun selectConfidentEpgVodMatch(
     }
     val yearHint = EPG_YEAR_HINT.find("$programTitle ${programDescription.orEmpty()}")?.value
     return if (yearHint != null) {
-        exactMatches.firstOrNull { it.year == yearHint }
+        exactMatches.singleOrNull { it.year == yearHint }
     } else {
-        exactMatches.firstOrNull()
+        exactMatches.singleOrNull()
     }
 }

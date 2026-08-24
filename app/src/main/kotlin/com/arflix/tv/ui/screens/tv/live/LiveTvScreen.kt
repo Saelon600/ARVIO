@@ -1693,29 +1693,6 @@ fun LiveTvScreen(
         }
     }
 
-    fun selectChannel(channel: EnrichedChannel) {
-        invalidateProgramActionLookup()
-        noteGuideUserNavigation()
-        focusedChannelId = channel.id
-        epgPrefetchAnchorId = channel.id
-        rememberedChannelByCategory[selectedCategoryId] = channel.id
-        val currentDisplayId = displayChannelIdFor(playingChannelId, visibleEnrichedState.value.index.byId, variantGroups)
-        val isSamePlayingChannel = channel.id == playingChannelId || channel.id == currentDisplayId
-        if (isSamePlayingChannel && !isFullScreen) {
-            // Second tap on the already-playing channel → fullscreen
-            playingCatchupProgram = null
-            catchupPlaybackOffsetMs = 0L
-            isFullScreen = true
-            hudPokeSignal++
-        } else {
-            // First tap or different channel → tune in mini-player
-            playingChannelId = channel.id
-            playingCatchupProgram = null
-            catchupPlaybackOffsetMs = 0L
-            fullscreenGuideOpen = false
-        }
-    }
-
     fun openVariantPicker(channel: EnrichedChannel) {
         noteGuideUserNavigation()
         if (variantCountFor(channel, variantGroups) > 1) {
@@ -1760,23 +1737,33 @@ fun LiveTvScreen(
         focusChannelList(playbackChannel.id)
     }
 
-    fun showProgramActionDialog(channel: EnrichedChannel, program: IptvProgram) {
-        val channelAllowsVod = epgChannelAllowsVodSearch(channel.name, channel.source.group)
-        val isPastPlayable = program.endUtcMillis <= guideClockMillis
+    fun isSamePlayingChannel(channel: EnrichedChannel): Boolean {
+        val currentDisplayId = displayChannelIdFor(
+            playingChannelId,
+            visibleEnrichedState.value.index.byId,
+            variantGroups,
+        )
+        return channel.id == playingChannelId || channel.id == currentDisplayId
+    }
+
+    fun playLiveFullscreen(channel: EnrichedChannel) {
         invalidateProgramActionLookup()
-        if (!channelAllowsVod) {
-            when (
-                epgProgramSelectionOutcome(
-                    isPastPlayable = isPastPlayable,
-                    channelAllowsVod = false,
-                    vodMatch = null,
-                )
-            ) {
-                EpgProgramSelectionOutcome.PlayCatchup ->
-                    playProgramInMini(channel, epgCatchupPlaybackProgram(program))
-                EpgProgramSelectionOutcome.PlayLive -> playProgramInMini(channel, null)
-                EpgProgramSelectionOutcome.ShowDialog -> Unit
-            }
+        noteGuideUserNavigation()
+        playingChannelId = channel.id
+        focusedChannelId = channel.id
+        epgPrefetchAnchorId = channel.id
+        rememberedChannelByCategory[selectedCategoryId] = channel.id
+        playingCatchupProgram = null
+        catchupPlaybackOffsetMs = 0L
+        fullscreenGuideOpen = false
+        isFullScreen = true
+        hudPokeSignal++
+    }
+
+    fun resolveVodOrPlayFullscreen(channel: EnrichedChannel, program: IptvProgram) {
+        invalidateProgramActionLookup()
+        if (!epgChannelAllowsVodSearch(channel.name, channel.source.group)) {
+            playLiveFullscreen(channel)
             return
         }
         val lookupGeneration = programActionLookupGuard.beginLookup()
@@ -1788,21 +1775,56 @@ fun LiveTvScreen(
                 channelGroup = channel.source.group,
             )
             if (!programActionLookupGuard.isCurrent(lookupGeneration)) return@launch
-            when (
-                epgProgramSelectionOutcome(
-                    isPastPlayable = isPastPlayable,
-                    channelAllowsVod = channelAllowsVod,
-                    vodMatch = match,
-                )
-            ) {
-                EpgProgramSelectionOutcome.ShowDialog -> {
+            when (vodLookupResolution(match != null)) {
+                EpgInteractionAction.ShowVodDialog -> {
                     programActionVodMatch = match
                     programActionDialog = ProgramActionData(channel, program)
                 }
-                EpgProgramSelectionOutcome.PlayCatchup ->
-                    playProgramInMini(channel, epgCatchupPlaybackProgram(program))
-                EpgProgramSelectionOutcome.PlayLive -> playProgramInMini(channel, null)
+                EpgInteractionAction.PlayLiveFullscreen -> playLiveFullscreen(channel)
+                else -> Unit
             }
+        }
+    }
+
+    fun selectChannel(channel: EnrichedChannel, currentProgram: IptvProgram? = null) {
+        val sameChannel = isSamePlayingChannel(channel)
+        when (
+            channelRowInteractionAction(
+                isSamePlayingChannel = sameChannel,
+                hasCurrentProgram = currentProgram != null,
+                vodActionsEnabled = state.epgVodActionsEnabled,
+            )
+        ) {
+            EpgInteractionAction.PlayLiveMini -> playProgramInMini(channel, null)
+            EpgInteractionAction.ResolveVodOrPlayFullscreen ->
+                resolveVodOrPlayFullscreen(channel, currentProgram ?: return)
+            EpgInteractionAction.PlayLiveFullscreen -> playLiveFullscreen(channel)
+            else -> Unit
+        }
+    }
+
+    fun selectEpgProgram(channel: EnrichedChannel, program: IptvProgram) {
+        val temporalState = when {
+            program.isLive(guideClockMillis) -> EpgTemporalState.Live
+            program.endUtcMillis <= guideClockMillis -> EpgTemporalState.Past
+            else -> EpgTemporalState.Future
+        }
+        // EpgGrid only forwards past programmes when catch-up is supported.
+        val catchupSupported = temporalState == EpgTemporalState.Past
+        when (
+            epgProgramInteractionAction(
+                temporalState = temporalState,
+                isSamePlayingChannel = isSamePlayingChannel(channel),
+                isCatchupSupported = catchupSupported,
+                vodActionsEnabled = state.epgVodActionsEnabled,
+            )
+        ) {
+            EpgInteractionAction.PlayLiveMini -> playProgramInMini(channel, null)
+            EpgInteractionAction.PlayCatchup -> playProgramInMini(channel, program)
+            EpgInteractionAction.ResolveVodOrPlayFullscreen -> resolveVodOrPlayFullscreen(channel, program)
+            EpgInteractionAction.PlayLiveFullscreen -> playLiveFullscreen(channel)
+            EpgInteractionAction.NoOp,
+            EpgInteractionAction.ShowVodDialog -> Unit
         }
     }
 
@@ -2587,21 +2609,15 @@ fun LiveTvScreen(
                         scrollResetKey = "$selectedProviderId|$selectedCategoryId|$filteredChannelsWindowKey|$normalizedGuideStart",
                         compact = true,
                         gridFocused = focusZone == LiveTvFocusZone.EPG,
-                        onChannelSelect = { channel, program ->
+                        onChannelSelect = { channel ->
                             focusZone = LiveTvFocusZone.CHANNEL_LIST
-                            if (program != null) {
-                                showProgramActionDialog(channel, program)
-                            } else {
-                                selectChannel(channel)
-                            }
+                            val currentProgram = effectiveGuideNowNext[channel.id]
+                                ?.now
+                                ?.takeIf { it.isLive(guideClockMillis) }
+                            selectChannel(channel, currentProgram)
                         },
                         onProgramSelect = { channel, program ->
-                            if (program != null) {
-                                // Show action dialog: Watch Live vs Search Sources
-                                showProgramActionDialog(channel, program)
-                            } else {
-                                playProgramInMini(channel, null)
-                            }
+                            program?.let { selectEpgProgram(channel, it) }
                         },
                         onChannelFocused = { channel -> commitFocusedChannel(channel) },
                         onChannelFavoriteToggle = { id -> viewModel.toggleFavoriteChannel(id) },
@@ -2737,20 +2753,14 @@ fun LiveTvScreen(
                         scrollResetKey = "$selectedProviderId|$selectedCategoryId|$filteredChannelsWindowKey|$normalizedGuideStart",
                         compact = compactTouchLayout,
                         gridFocused = focusZone == LiveTvFocusZone.CHANNEL_LIST || focusZone == LiveTvFocusZone.EPG,
-                        onChannelSelect = { channel, program ->
-                            if (program != null) {
-                                showProgramActionDialog(channel, program)
-                            } else {
-                                selectChannel(channel)
-                            }
+                        onChannelSelect = { channel ->
+                            val currentProgram = effectiveGuideNowNext[channel.id]
+                                ?.now
+                                ?.takeIf { it.isLive(guideClockMillis) }
+                            selectChannel(channel, currentProgram)
                         },
                         onProgramSelect = { channel, program ->
-                            if (program != null) {
-                                // Show action dialog: Watch Live vs Search Sources
-                                showProgramActionDialog(channel, program)
-                            } else {
-                                playProgramInMini(channel, null)
-                            }
+                            program?.let { selectEpgProgram(channel, it) }
                         },
                         onChannelFocused = { channel -> commitFocusedChannel(channel) },
                         onChannelFavoriteToggle = { id -> viewModel.toggleFavoriteChannel(id) },
@@ -3046,10 +3056,21 @@ fun LiveTvScreen(
                         val target = guideChannel ?: playingChannel
                         guideOpenedFromQuickZap = false
                         if (program != null && target != null) {
-                            // Show action dialog (Watch Live / Search Sources) instead of playing directly
-                            showProgramActionDialog(target, program)
-                        } else if (target != null) {
-                            playProgramInFullscreen(program, target)
+                            when {
+                                program.endUtcMillis <= guideClockMillis ->
+                                    playProgramInFullscreen(program, target)
+                                program.isLive(guideClockMillis) && isSamePlayingChannel(target) && state.epgVodActionsEnabled ->
+                                    resolveVodOrPlayFullscreen(target, program)
+                                program.isLive(guideClockMillis) && isSamePlayingChannel(target) ->
+                                    playProgramInFullscreen(null, target)
+                                program.isLive(guideClockMillis) -> {
+                                    // First selection of another live channel follows the same
+                                    // guide contract: tune it in the mini-player.
+                                    fullscreenGuideOpen = false
+                                    isFullScreen = false
+                                    playProgramInMini(target, null)
+                                }
+                            }
                         }
                     },
                     onLeftClick = {
