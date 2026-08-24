@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Clock
 import javax.inject.Inject
 
 private fun isSupplementalStream(stream: StreamSource): Boolean =
@@ -205,6 +206,13 @@ class PlayerViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
+    private val nextEpisodeAirDateResolver = NextEpisodeAirDateResolver(
+        loadSeason = { tmdbId, seasonNumber ->
+            tmdbApi.getTvSeason(tmdbId, seasonNumber, Constants.TMDB_API_KEY)
+        },
+        clock = Clock.systemDefaultZone(),
+    )
+
     private var currentMediaType: MediaType = MediaType.MOVIE
     private var currentMediaId: Int = 0
     private var currentSeason: Int? = null
@@ -261,26 +269,10 @@ class PlayerViewModel @Inject constructor(
         return fallbackAdjacentEpisodeIdentity(current, forward)
     }
 
-    /**
-     * Checks whether the given episode (identified by season + episode number) has aired.
-     * Returns `true` if the episode has an air date that is today or in the past.
-     * Returns `true` if the air date is unknown (optimistically allow autoplay).
-     *
-     * Used to gate autoplay on unaired episodes (issue #589).
-     */
-    suspend fun isEpisodeAired(
+    internal suspend fun resolveNextEpisodeAirDate(
         tmdbId: Int,
-        seasonNumber: Int,
-        episodeNumber: Int
-    ): Boolean {
-        return runCatching {
-            val seasonDetails = tmdbApi.getTvSeason(tmdbId, seasonNumber, Constants.TMDB_API_KEY)
-            val episode = seasonDetails.episodes.firstOrNull { it.episodeNumber == episodeNumber }
-            val airDateStr = episode?.airDate?.takeIf { it.isNotBlank() } ?: return@runCatching true
-            val airDate = java.time.LocalDate.parse(airDateStr, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
-            !airDate.isAfter(java.time.LocalDate.now())
-        }.getOrDefault(true)
-    }
+        target: EpisodeIdentity,
+    ): NextEpisodeAirDateResolution = nextEpisodeAirDateResolver.resolve(tmdbId, target)
 
     // AI subtitle settings (read once per video load)
     private var aiSubtitleEnabled = false
