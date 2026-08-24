@@ -6,7 +6,11 @@ enum class SubtitleFontOption(val preferenceValue: String) {
     NOTO_SANS("Noto Sans"),
     ATKINSON_HYPERLEGIBLE("Atkinson Hyperlegible"),
     LEXEND("Lexend"),
-    ROBOTO_CONDENSED("Roboto Condensed");
+    ROBOTO_CONDENSED("Roboto Condensed"),
+    NUNITO_SANS("Nunito Sans"),
+    QUICKSAND("Quicksand"),
+    RUBIK("Rubik"),
+    VARELA_ROUND("Varela Round");
 
     companion object {
         const val DefaultPreference = "System"
@@ -25,3 +29,9 @@ enum class SubtitleFontOption(val preferenceValue: String) {
         }
     }
 }
+
+internal fun shouldPreserveEmbeddedSubtitleStyles(
+    fontPreference: String?,
+    stylizedSubtitlesEnabled: Boolean,
+): Boolean = stylizedSubtitlesEnabled &&
+    SubtitleFontOption.fromPreference(fontPreference) == SubtitleFontOption.SYSTEM
