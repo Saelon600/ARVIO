@@ -1239,17 +1239,26 @@ fun LiveTvScreen(
     }
     val currentActionGuideNowNext by rememberUpdatedState(actionGuideNowNext)
     val currentGuideIdentityKeysByChannelId by rememberUpdatedState(guideIdentityKeysByChannelId)
-    fun currentProgramForAction(channel: EnrichedChannel): IptvProgram? = guideProgramForAction(
-        channelId = channel.id,
-        guideIdentityKeys = guideIdentityKeys(
-            channel.source.epgId,
-            channel.source.tvgName,
-            channel.source.rawTitle,
-            channel.name,
-        ),
-        guideByChannelId = currentActionGuideNowNext,
-        guideIdentityKeysByChannelId = currentGuideIdentityKeysByChannelId,
-    )
+    fun currentProgramForAction(channel: EnrichedChannel): IptvProgram? {
+        val direct = guideProgramForAction(
+            channelId = channel.id,
+            guideIdentityKeys = guideIdentityKeys(
+                channel.source.epgId,
+                channel.source.tvgName,
+                channel.source.rawTitle,
+                channel.name,
+            ),
+            guideByChannelId = currentActionGuideNowNext,
+            guideIdentityKeysByChannelId = currentGuideIdentityKeysByChannelId,
+        )
+        if (direct != null) return direct
+        // Final fallback: normalized channel name alone, in case the provider-specific
+        // aliases differ but the human-visible channel identity matches.
+        val nameKey = guideIdentityKeys(channel.name).firstOrNull() ?: return null
+        return enrichedState.value.all
+            .firstOrNull { it.id != channel.id && nameKey in guideIdentityKeys(it.name) }
+            ?.let { currentActionGuideNowNext[it.id]?.now }
+    }
 
     val epgAnchorChannelId = epgPrefetchAnchorId
         ?: selectedDisplayChannelId
@@ -1786,6 +1795,69 @@ fun LiveTvScreen(
         hudPokeSignal++
     }
 
+    /**
+     * Get the current live programme for a channel, using the same guide data
+     * the EPG grid is already displaying. This is the direct source — no identity-
+     * key aliasing or cross-playlist matching. If the grid shows a programme,
+     * this returns it; if the grid shows "guide pending", this returns null.
+     */
+    fun displayedCurrentProgram(channel: EnrichedChannel): IptvProgram? =
+        effectiveGuideNowNext[channel.id]?.now?.takeIf { it.isLive(guideClockMillis) }
+
+    /**
+     * When the user second-clicks a playing channel but EPG data hasn't loaded
+     * yet (common when switching to a different playlist), trigger an immediate
+     * network EPG fetch for that channel, then attempt the VOD resolution.
+     * This prevents the feature from silently falling back to fullscreen.
+     */
+    fun resolveVodWithEagerFetch(channel: EnrichedChannel) {
+        invalidateProgramActionLookup()
+        if (!epgChannelAllowsVodSearch(channel.name, channel.source.group)) {
+            playLiveFullscreen(channel)
+            return
+        }
+        val lookupGeneration = programActionLookupGuard.beginLookup()
+        programActionLookupJob[0] = coroutineScope.launch {
+            // Force a network EPG fetch for this specific channel via the public API.
+            // refreshCurrentChannelEpg does cache-first, then network, then merges.
+            viewModel.refreshCurrentChannelEpg(channel.id, forceNetworkForLargeList = true)
+            // Wait briefly for the refresh to land in state.snapshot.nowNext.
+            kotlinx.coroutines.delay(300L)
+            if (!programActionLookupGuard.isCurrent(lookupGeneration)) return@launch
+            // After the fetch, try to get the current programme from the displayed guide.
+            val program = displayedCurrentProgram(channel)
+                ?: currentProgramForAction(channel)?.takeIf { it.isLive(guideClockMillis) }
+            if (program == null) {
+                // Still no EPG data — fall back to fullscreen, not a dead end.
+                playLiveFullscreen(channel)
+                return@launch
+            }
+            if (!programActionLookupGuard.isCurrent(lookupGeneration)) return@launch
+            val match = viewModel.findEpgVodMatch(
+                title = program.title,
+                description = program.description,
+                channelName = channel.name,
+                channelGroup = channel.source.group,
+            )
+            if (!programActionLookupGuard.isCurrent(lookupGeneration)) return@launch
+            if (!epgVodLookupCanPublish(
+                    selectedProgram = program,
+                    currentProgram = displayedCurrentProgram(channel)
+                        ?: currentProgramForAction(channel),
+                    nowMillis = System.currentTimeMillis(),
+                )
+            ) return@launch
+            when (vodLookupResolution(match != null)) {
+                EpgInteractionAction.ShowVodDialog -> {
+                    programActionVodMatch = match
+                    programActionDialog = ProgramActionData(channel, program)
+                }
+                EpgInteractionAction.PlayLiveFullscreen -> playLiveFullscreen(channel)
+                else -> Unit
+            }
+        }
+    }
+
     fun resolveVodOrPlayFullscreen(channel: EnrichedChannel, program: IptvProgram) {
         invalidateProgramActionLookup()
         if (!epgChannelAllowsVodSearch(channel.name, channel.source.group)) {
@@ -1831,7 +1903,20 @@ fun LiveTvScreen(
             EpgInteractionAction.PlayLiveMini -> playProgramInMini(channel, null)
             EpgInteractionAction.ResolveVodOrPlayFullscreen ->
                 resolveVodOrPlayFullscreen(channel, currentProgram ?: return)
-            EpgInteractionAction.PlayLiveFullscreen -> playLiveFullscreen(channel)
+            EpgInteractionAction.PlayLiveFullscreen -> {
+                // Second click on the playing channel but no current EPG programme.
+                // Instead of going straight to fullscreen, try an eager EPG fetch
+                // so the Watch Live / Stream Now dialog can still appear. This is
+                // the key fix for channels on non-first playlists where EPG data
+                // hasn't been prefetched yet.
+                if (sameChannel && state.epgVodActionsEnabled &&
+                    epgChannelAllowsVodSearch(channel.name, channel.source.group)
+                ) {
+                    resolveVodWithEagerFetch(channel)
+                } else {
+                    playLiveFullscreen(channel)
+                }
+            }
             else -> Unit
         }
     }
@@ -2644,8 +2729,7 @@ fun LiveTvScreen(
                         gridFocused = focusZone == LiveTvFocusZone.EPG,
                         onChannelSelect = { channel ->
                             focusZone = LiveTvFocusZone.CHANNEL_LIST
-                            val currentProgram = currentProgramForAction(channel)
-                                ?.takeIf { it.isLive(guideClockMillis) }
+                            val currentProgram = displayedCurrentProgram(channel)
                             selectChannel(channel, currentProgram)
                         },
                         onProgramSelect = { channel, program ->
@@ -2786,8 +2870,7 @@ fun LiveTvScreen(
                         compact = compactTouchLayout,
                         gridFocused = focusZone == LiveTvFocusZone.CHANNEL_LIST || focusZone == LiveTvFocusZone.EPG,
                         onChannelSelect = { channel ->
-                            val currentProgram = currentProgramForAction(channel)
-                                ?.takeIf { it.isLive(guideClockMillis) }
+                            val currentProgram = displayedCurrentProgram(channel)
                             selectChannel(channel, currentProgram)
                         },
                         onProgramSelect = { channel, program ->

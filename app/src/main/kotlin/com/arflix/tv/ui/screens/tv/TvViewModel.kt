@@ -1335,7 +1335,7 @@ class TvViewModel @Inject constructor(
     ) {
         if (channelIds.isEmpty()) return
         val largeList = isActiveLargeIptvList()
-        val firstPaintLimit = if (largeList) 8 else 28
+        val firstPaintLimit = if (largeList) 16 else 32
         val selectedId = selectedChannelId
             ?.takeIf { it in channelIds }
             ?: channelIds.firstOrNull()
@@ -1376,7 +1376,7 @@ class TvViewModel @Inject constructor(
         lastVisibleEpgRefreshAt = now
         val requestLimit = maxOf(firstPaintLimit, eagerLimit, backgroundLimit)
             .coerceAtMost(orderedIds.size)
-            .coerceAtMost(if (largeList) 36 else 240)
+            .coerceAtMost(if (largeList) 48 else 240)
         val missingIds = orderedIds
             .filterNot { id ->
                 hasUsefulVisibleGuideData(_uiState.value.snapshot.nowNext[id])
@@ -1670,9 +1670,9 @@ class TvViewModel @Inject constructor(
             while (true) {
                 val drain = drainVisibleEpgBatch(
                     maxChannels = when (pass) {
-                        0 -> 18
-                        1 -> 32
-                        else -> 48
+                        0 -> 32
+                        1 -> 48
+                        else -> 64
                     }
                 )
                 val batch = drain.ids
